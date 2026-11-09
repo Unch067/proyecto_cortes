@@ -42,7 +42,7 @@ if "resultados" not in st.session_state:
 if "res_original" not in st.session_state:
     st.session_state.res_original = None
 
-st.title("✂️ Plan de Corte y Aprovechamiento de Retales")
+st.title("✂️ VERSION NUEVA - Plan de Corte")
 
 # ==========================================
 # 2. SISTEMA DE PESTAÑAS
