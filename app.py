@@ -161,38 +161,68 @@ with tab_res:
             c3.download_button("Descargar Pendientes", pd.DataFrame(res["pendientes"]).to_csv(index=False).encode('utf-8'), "pendientes.csv", "text/csv")
 
         # ==========================================
-        # VISUALIZACIÓN 3D Y ANIMACIONES
+        # 3. GEMELO DIGITAL Y VISUALIZACIONES (LAYOUT DE TALLER)
         # ==========================================
         st.markdown("---")
-        st.write("🚨 ¡EL CÓDIGO NUEVO ESTÁ AQUÍ! 🚨")
-        st.subheader("📊 Análisis Visual del Plan de Corte")
-        
-        col_graf1, col_graf2 = st.columns(2)
-        
-        with col_graf1:
-            # 1. Gráfico 3D de Aprovechamiento
-            origenes = [fila["Origen_ID"] for fila in res["detalle_csv"]]
-            sobrantes = [fila["Sobrante_mm"] for fila in res["detalle_csv"]]
-            usados = [fila["Longitud_Inicial"] - fila["Sobrante_mm"] for fila in res["detalle_csv"]]
+        st.subheader("📐 Layout de Taller: Diagrama de Corte 2D")
+        st.write("Visualización física de cómo se cortan los tubos y retales (puedes pasar el mouse para ver los detalles):")
+
+        # Construir el gráfico de barras horizontales (Gantt)
+        fig_layout = go.Figure()
+
+        for idx, fila in enumerate(res["detalle_csv"]):
+            origen = fila["Origen_ID"]
+            x_actual = 0
             
-            fig_3d = px.scatter_3d(
-                x=origenes, 
-                y=usados, 
-                z=sobrantes, 
-                color=origenes,
-                size=[30]*len(origenes), # Tamaño de los puntos
-                title="Aprovechamiento por Tubo (3D)"
-            )
-            fig_3d.update_layout(
-                scene=dict(
-                    xaxis_title='Origen',
-                    yaxis_title='Material Usado (mm)',
-                    zaxis_title='Sobrante (mm)'
-                ),
-                height=450,
-                margin=dict(l=0, r=0, b=0, t=40)
-            )
-            st.plotly_chart(fig_3d, use_container_width=True)
+            # Parsear las piezas asignadas (ej. "P2900(2900)")
+            piezas_str = fila["Piezas_Asignadas"].split(" | ") if fila["Piezas_Asignadas"] else []
+            
+            for p in piezas_str:
+                if "(" in p:
+                    nombre = p.split("(")[0]
+                    largo = int(p.split("(")[1].replace(")", ""))
+                    
+                    fig_layout.add_trace(go.Bar(
+                        y=[origen], x=[largo], base=x_actual, orientation='h',
+                        name='Pieza Útil', marker_color='#2E86C1',
+                        text=f"{nombre} ({largo}mm)", textposition='inside', hoverinfo='text'
+                    ))
+                    x_actual += largo
+                    
+                    # Añadir el kerf (pérdida por corte)
+                    fig_layout.add_trace(go.Bar(
+                        y=[origen], x=[fila["Kerf_Total"]], base=x_actual, orientation='h',
+                        name='Pérdida por Corte', marker_color='#E74C3C',
+                        text="Kerf", textposition='inside', hoverinfo='text'
+                    ))
+                    x_actual += fila["Kerf_Total"]
+
+            # Añadir el sobrante final
+            if fila["Sobrante_mm"] > 0:
+                color_sobrante = '#F1C40F' if fila["Clasificacion"] == "Retal Reutilizable" else '#95A5A6'
+                fig_layout.add_trace(go.Bar(
+                    y=[origen], x=[fila["Sobrante_mm"]], base=x_actual, orientation='h',
+                    name=f"Sobrante ({fila['Clasificacion']})", marker_color=color_sobrante,
+                    text=f"{fila['Sobrante_mm']}mm", textposition='inside', hoverinfo='text'
+                ))
+
+        fig_layout.update_layout(
+            barmode='stack',
+            xaxis_title="Longitud (mm)",
+            yaxis_title="Origen",
+            height=350,
+            margin=dict(l=0, r=0, b=0, t=20),
+            showlegend=False
+        )
+        st.plotly_chart(fig_layout, use_container_width=True)
+
+        # ==========================================
+        # COMPARATIVA Y BALANCE
+        # ==========================================
+        st.markdown("---")
+        st.subheader("📊 Análisis Visual Comparativo")
+        
+        col_graf2, col_graf3 = st.columns(2)
 
         with col_graf2:
             # 2. Animación del Balance de Materiales (Gráfico Dona interactivo)
@@ -210,9 +240,23 @@ with tab_res:
                 color_discrete_sequence=px.colors.qualitative.Set3
             )
             fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-            fig_pie.update_layout(height=450, margin=dict(l=0, r=0, b=0, t=40))
+            fig_pie.update_layout(height=350, margin=dict(l=0, r=0, b=0, t=40))
             
             st.plotly_chart(fig_pie, use_container_width=True)
+
+        with col_graf3:
+            # 3. Gráfico Comparativo de Barras (Optimizado vs Original)
+            fig_comp = go.Figure(data=[
+                go.Bar(name='Optimizado', x=['Tubos Nuevos', 'Descarte (mm)'], y=[res["tubos_comprados"], bal["descarte"]], marker_color='#2ECC71'),
+                go.Bar(name='Orden Original', x=['Tubos Nuevos', 'Descarte (mm)'], y=[res_orig["tubos_comprados"], res_orig["balance"]["descarte"]], marker_color='#E74C3C')
+            ])
+            fig_comp.update_layout(
+                title="Eficiencia del Algoritmo",
+                barmode='group',
+                height=350,
+                margin=dict(l=0, r=0, b=0, t=40)
+            )
+            st.plotly_chart(fig_comp, use_container_width=True)
 
     else:
         st.info("Ingrese sus datos en las pestañas anteriores y presione 'Calcular Optimización'.")
