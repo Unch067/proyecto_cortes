@@ -160,58 +160,59 @@ with tab_res:
             st.dataframe(pd.DataFrame(res["pendientes"]))
             c3.download_button("Descargar Pendientes", pd.DataFrame(res["pendientes"]).to_csv(index=False).encode('utf-8'), "pendientes.csv", "text/csv")
 
-            # ==========================================
-            # VISUALIZACIÓN 3D Y ANIMACIONES (AQUÍ ESTÁ BIEN)
-            # ==========================================
-            st.write("🚨 ¡EL CÓDIGO NUEVO ESTÁ AQUÍ! 🚨")
-            st.subheader("📊 Análisis Visual del Plan de Corte")
+        # ==========================================
+        # VISUALIZACIÓN 3D Y ANIMACIONES
+        # ==========================================
+        st.markdown("---")
+        st.write("🚨 ¡EL CÓDIGO NUEVO ESTÁ AQUÍ! 🚨")
+        st.subheader("📊 Análisis Visual del Plan de Corte")
+        
+        col_graf1, col_graf2 = st.columns(2)
+        
+        with col_graf1:
+            # 1. Gráfico 3D de Aprovechamiento (Barras 3D)
+            origenes = [fila["Origen_ID"] for fila in res["detalle_csv"]]
+            sobrantes = [fila["Sobrante_mm"] for fila in res["detalle_csv"]]
+            usados = [fila["Longitud_Inicial"] - fila["Sobrante_mm"] for fila in res["detalle_csv"]]
             
-            col_graf1, col_graf2 = st.columns(2)
+            fig_3d = go.Figure(data=[
+                go.Bar(name='Material Usado (mm)', x=origenes, y=['Usado']*len(origenes), z=usados, marker_color='#2E86C1'),
+                go.Bar(name='Sobrante / Descarte (mm)', x=origenes, y=['Sobrante']*len(origenes), z=sobrantes, marker_color='#E74C3C')
+            ])
             
-            with col_graf1:
-                # 1. Gráfico 3D de Aprovechamiento (Barras 3D)
-                origenes = [fila["Origen_ID"] for fila in res["detalle_csv"]]
-                sobrantes = [fila["Sobrante_mm"] for fila in res["detalle_csv"]]
-                usados = [fila["Longitud_Inicial"] - fila["Sobrante_mm"] for fila in res["detalle_csv"]]
-                
-                fig_3d = go.Figure(data=[
-                    go.Bar(name='Material Usado (mm)', x=origenes, y=['Usado']*len(origenes), z=usados, marker_color='#2E86C1'),
-                    go.Bar(name='Sobrante / Descarte (mm)', x=origenes, y=['Sobrante']*len(origenes), z=sobrantes, marker_color='#E74C3C')
-                ])
-                
-                fig_3d.update_layout(
-                    title="Aprovechamiento por Tubo/Retal (3D)",
-                    scene=dict(
-                        xaxis_title='Origen',
-                        yaxis_title='Estado',
-                        zaxis_title='Milímetros',
-                        camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
-                    ),
-                    barmode='group',
-                    height=450,
-                    margin=dict(l=0, r=0, b=0, t=40)
-                )
-                st.plotly_chart(fig_3d, use_container_width=True)
+            fig_3d.update_layout(
+                title="Aprovechamiento por Tubo/Retal (3D)",
+                scene=dict(
+                    xaxis_title='Origen',
+                    yaxis_title='Estado',
+                    zaxis_title='Milímetros',
+                    camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
+                ),
+                barmode='group',
+                height=450,
+                margin=dict(l=0, r=0, b=0, t=40)
+            )
+            st.plotly_chart(fig_3d, use_container_width=True)
 
-            with col_graf2:
-                # 2. Animación del Balance de Materiales (Gráfico Dona interactivo)
-                labels = ["Material Incorporado", "Pérdida por Corte", "Descarte Inútil", "Retal Reutilizable"]
-                values = [bal["incorporado"], bal["perdida"], bal["descarte"], bal["nuevo_retal"]]
-                
-                labels_filtrados = [l for l, v in zip(labels, values) if v > 0]
-                values_filtrados = [v for v in values if v > 0]
-                
-                fig_pie = px.pie(
-                    names=labels_filtrados, 
-                    values=values_filtrados, 
-                    hole=0.4,
-                    title="Balance de Materiales (Interactivo)",
-                    color_discrete_sequence=px.colors.qualitative.Set3
-                )
-                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                fig_pie.update_layout(height=450, margin=dict(l=0, r=0, b=0, t=40))
-                
-                st.plotly_chart(fig_pie, use_container_width=True)
+        with col_graf2:
+            # 2. Animación del Balance de Materiales (Gráfico Dona interactivo)
+            labels = ["Material Incorporado", "Pérdida por Corte", "Descarte Inútil", "Retal Reutilizable"]
+            values = [bal["incorporado"], bal["perdida"], bal["descarte"], bal["nuevo_retal"]]
+            
+            labels_filtrados = [l for l, v in zip(labels, values) if v > 0]
+            values_filtrados = [v for v in values if v > 0]
+            
+            fig_pie = px.pie(
+                names=labels_filtrados, 
+                values=values_filtrados, 
+                hole=0.4,
+                title="Balance de Materiales (Interactivo)",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            fig_pie.update_layout(height=450, margin=dict(l=0, r=0, b=0, t=40))
+            
+            st.plotly_chart(fig_pie, use_container_width=True)
 
     else:
         st.info("Ingrese sus datos en las pestañas anteriores y presione 'Calcular Optimización'.")
