@@ -12,7 +12,7 @@ from components.graficos import (
     generar_reporte_texto
 )
 
-st.set_page_config(page_title="Plan de Corte - Grupo 3", layout="wide")
+st.set_page_config(page_title="OptiCorte 1D - Plan de Corte", layout="wide")
 
 # ==========================================
 # ESTILOS PERSONALIZADOS (Oculta menús y pinta botones)
@@ -49,7 +49,8 @@ if "resultados" not in st.session_state:
 if "res_original" not in st.session_state:
     st.session_state.res_original = None
 
-st.title("✂️ VERSION NUEVA - Plan de Corte")
+st.title("📐 OptiCorte 1D | Optimización y Aprovechamiento de Retales")
+st.caption("Herramienta de control de descarte, balance de masa y layout de taller · Grupo 3")
 
 # ==========================================
 # 2. SISTEMA DE PESTAÑAS
