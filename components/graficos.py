@@ -36,14 +36,14 @@ def _crear_cubo_malla(x0, x1, y_centro, ancho_y, alto_z, color, hover_text, opac
 
 def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
     """
-    Genera el entorno 3D interactivo (Gemelo Digital) representando todas
-    las barras, cortes y retales clasificados en sus bancadas de taller.
+    Genera el entorno 3D interactivo con relación de aspecto calibrada
+    para evitar el efecto de alargamiento excesivo y solapamiento de etiquetas.
     """
     fig = go.Figure()
     
-    ancho_tubo = 80.0
-    alto_tubo = 80.0
-    paso_y = 200.0
+    ancho_tubo = 100.0
+    alto_tubo = 100.0
+    paso_y = 280.0  # Más separación física en Y para que no se pisen las etiquetas
 
     nombres_eje_y = []
     posiciones_eje_y = []
@@ -67,7 +67,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
                     f"<b>Bancada:</b> {origen_id}<br>"
                     f"<b>Pieza:</b> {nombre}<br>"
                     f"<b>Longitud:</b> {largo} mm<br>"
-                    f"<b>Tramo:</b> [{x_actual} mm - {x_actual + largo} mm]"
+                    f"<b>Tramo:</b> [{x_actual} - {x_actual + largo} mm]"
                 )
                 fig.add_trace(_crear_cubo_malla(
                     x0=x_actual,
@@ -80,26 +80,23 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
                 ))
                 x_actual += largo
 
-                # 2. Prisma 3D: Disco de Corte (Kerf)
-                es_ultimo_corte = (p_idx == len(piezas_str) - 1) and (fila["Sobrante_mm"] == 0)
-                if not es_ultimo_corte and (x_actual < fila["Longitud_Inicial"]):
-                    espesor_kerf = kerf_nominal if kerf_nominal > 0 else 4
-                    hover_kerf = (
-                        f"<b>Pérdida por Corte (Kerf):</b> {espesor_kerf} mm<br>"
-                        f"<b>Cota de corte:</b> {x_actual} mm"
-                    )
+                # 2. Prisma 3D: Kerf
+                es_ultimo = (p_idx == len(piezas_str) - 1) and (fila["Sobrante_mm"] == 0)
+                if not es_ultimo and (x_actual < fila["Longitud_Inicial"]):
+                    espesor = kerf_nominal if kerf_nominal > 0 else 4
+                    hover_kerf = f"<b>Disco (Kerf):</b> {espesor} mm<br><b>Cota:</b> {x_actual} mm"
                     fig.add_trace(_crear_cubo_malla(
                         x0=x_actual,
-                        x1=x_actual + espesor_kerf,
+                        x1=x_actual + espesor,
                         y_centro=y_pos,
-                        ancho_y=ancho_tubo * 1.15,
-                        alto_z=alto_tubo * 1.15,
+                        ancho_y=ancho_tubo * 1.25,
+                        alto_z=alto_tubo * 1.25,
                         color="#E53935",
                         hover_text=hover_kerf
                     ))
-                    x_actual += espesor_kerf
+                    x_actual += espesor
 
-        # 3. Prisma 3D: Sobrante / Descarte
+        # 3. Prisma 3D: Sobrante
         sobrante_mm = fila["Sobrante_mm"]
         if sobrante_mm > 0:
             clasif = fila["Clasificacion"]
@@ -107,8 +104,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
             hover_sob = (
                 f"<b>Bancada:</b> {origen_id}<br>"
                 f"<b>Estado:</b> {clasif}<br>"
-                f"<b>Longitud:</b> {sobrante_mm} mm<br>"
-                f"<b>Tramo final:</b> [{x_actual} mm - {fila['Longitud_Inicial']} mm]"
+                f"<b>Longitud:</b> {sobrante_mm} mm"
             )
             fig.add_trace(_crear_cubo_malla(
                 x0=x_actual,
@@ -121,10 +117,11 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
                 opacity=0.9
             ))
 
+    # Ajuste de escala visual (evita que 6000 mm deforme la ventana)
     fig.update_layout(
         scene=dict(
             xaxis=dict(
-                title="Longitud del Material (mm)",
+                title="Longitud (mm)",
                 backgroundcolor="rgba(15, 23, 42, 0.6)",
                 gridcolor="#334155",
                 showbackground=True,
@@ -132,7 +129,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
                 color="#F8FAFC"
             ),
             yaxis=dict(
-                title="Bancada / Tubo",
+                title="",
                 tickvals=posiciones_eje_y,
                 ticktext=nombres_eje_y,
                 backgroundcolor="rgba(15, 23, 42, 0.6)",
@@ -148,13 +145,14 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
                 showbackground=True
             ),
             camera=dict(
-                eye=dict(x=-1.3, y=-1.6, z=1.2),
+                eye=dict(x=-1.5, y=-1.5, z=1.4),
                 up=dict(x=0, y=0, z=1)
             ),
-            aspectmode="data"
+            aspectmode="manual",
+            aspectratio=dict(x=3.8, y=1.2, z=0.4)
         ),
         margin=dict(l=0, r=0, b=10, t=10),
-        height=500,
+        height=450,
         paper_bgcolor="rgba(0,0,0,0)"
     )
     return fig
@@ -162,7 +160,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
 
 def crear_grafico_balance_dona(bal):
     """
-    Dona analítica con visualización de balance de masa y KPI central.
+    Dona analítica con márgenes ampliados para evitar cortes de texto.
     """
     total_origen = bal.get("material_total_origen", 0)
     incorporado = bal.get("incorporado", 0)
@@ -193,27 +191,35 @@ def crear_grafico_balance_dona(bal):
     fig.add_trace(go.Pie(
         labels=labels,
         values=values,
-        hole=0.62,
+        hole=0.60,
         pull=pulls,
         marker=dict(colors=colors, line=dict(color="#0F172A", width=2)),
-        textinfo="percent+label",
-        textposition="outside",
-        textfont=dict(color="#F8FAFC", size=11),
+        textinfo="percent",
+        textposition="inside",
+        textfont=dict(color="#F8FAFC", size=12),
         hovertemplate="<b>%{label}</b><br>Longitud: %{value} mm<br>Proporción: %{percent}<extra></extra>"
     ))
 
     fig.update_layout(
         annotations=[
             dict(
-                text=f"<span style='font-size:11px;color:#94A3B8;'>APROVECHAMIENTO</span><br><b style='font-size:24px;color:#38BDF8;'>{eficiencia}%</b>",
+                text=f"<span style='font-size:11px;color:#94A3B8;'>APROVECHAMIENTO</span><br><b style='font-size:26px;color:#38BDF8;'>{eficiencia}%</b>",
                 x=0.5, y=0.5,
                 font_size=14,
                 showarrow=False
             )
         ],
-        showlegend=False,
-        height=360,
-        margin=dict(l=20, r=20, b=20, t=30),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.22,
+            xanchor="center",
+            x=0.5,
+            font=dict(color="#F8FAFC", size=11)
+        ),
+        height=380,
+        margin=dict(l=20, r=20, b=70, t=20),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)"
     )
@@ -222,14 +228,15 @@ def crear_grafico_balance_dona(bal):
 
 def crear_grafico_comparativo_dual(res, res_orig):
     """
-    Subplots desacoplados para comparar Tubos Nuevos y Descarte en mm.
+    Subplots desacoplados con espaciado horizontal ampliado y títulos concisos.
     """
     fig = make_subplots(
         rows=1, cols=2,
-        subplot_titles=("Tubos Comerciales Necesarios", "Descarte Inútil (mm)"),
-        horizontal_spacing=0.18
+        subplot_titles=("Tubos a Comprar (u)", "Descarte Total (mm)"),
+        horizontal_spacing=0.25
     )
 
+    # 1. Tubos Nuevos
     fig.add_trace(
         go.Bar(
             name="Optimizado (IA)",
@@ -255,6 +262,7 @@ def crear_grafico_comparativo_dual(res, res_orig):
         row=1, col=1
     )
 
+    # 2. Descarte Inútil
     fig.add_trace(
         go.Bar(
             name="Optimizado (IA)",
@@ -284,8 +292,8 @@ def crear_grafico_comparativo_dual(res, res_orig):
 
     fig.update_layout(
         barmode="group",
-        height=360,
-        margin=dict(l=10, r=10, b=20, t=50),
+        height=380,
+        margin=dict(l=10, r=10, b=40, t=50),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         legend=dict(
@@ -294,7 +302,7 @@ def crear_grafico_comparativo_dual(res, res_orig):
             y=1.12,
             xanchor="center",
             x=0.5,
-            font=dict(color="#F8FAFC")
+            font=dict(color="#F8FAFC", size=11)
         ),
         font=dict(color="#F8FAFC")
     )
