@@ -117,7 +117,6 @@ with tab_ped:
 
 with tab_res:
     if st.session_state.resultados:
-        st.balloons()  # 🎈 Animación de globos
         
         res = st.session_state.resultados
         bal = res["balance"]

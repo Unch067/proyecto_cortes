@@ -307,7 +307,12 @@ def crear_grafico_comparativo_dual(res, res_orig):
         font=dict(color="#F8FAFC")
     )
     fig.update_xaxes(showgrid=False, color="#94A3B8")
-    fig.update_yaxes(showgrid=True, gridcolor="#334155", color="#94A3B8")
+    fig.update_yaxes(
+        showgrid=True, 
+        gridcolor="#334155", 
+        color="#94A3B8",
+        rangemode="nonnegative"  # Evita que el eje Y muestre números negativos en 0
+    )
     return fig
 
 
