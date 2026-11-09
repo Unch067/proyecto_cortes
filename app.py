@@ -163,7 +163,7 @@ with tab_res:
             # ==========================================
             # VISUALIZACIÓN 3D Y ANIMACIONES (AQUÍ ESTÁ BIEN)
             # ==========================================
-            st.markdown("---")
+            st.write("🚨 ¡EL CÓDIGO NUEVO ESTÁ AQUÍ! 🚨")
             st.subheader("📊 Análisis Visual del Plan de Corte")
             
             col_graf1, col_graf2 = st.columns(2)
