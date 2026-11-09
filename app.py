@@ -138,7 +138,16 @@ with tab_res:
         diff_descarte = res_orig["balance"]["descarte"] - bal["descarte"]
         
         if diff_tubos > 0 or diff_descarte > 0:
-            st.info(f"✅ Cortar en el orden original requería **{res_orig['tubos_comprados']} tubos** y generaba **{res_orig['balance']['descarte']} mm** de descarte. La optimización ahorró **{diff_tubos} tubos** y **{diff_descarte} mm** de desperdicio.")
+            msg_tubos = f"ahorró **{diff_tubos} tubo{'s' if diff_tubos > 1 else ''}** comercial{'es' if diff_tubos > 1 else ''}" if diff_tubos > 0 else ""
+            if diff_descarte > 0:
+                msg_desc = f"redujo **{diff_descarte} mm** de descarte"
+            elif diff_descarte < 0:
+                msg_desc = f"generó **{-diff_descarte} mm** de descarte (asumible al evitar compras)"
+            else:
+                msg_desc = "mantuvo el mismo descarte"
+
+            conector = " y " if (msg_tubos and msg_desc) else ""
+            st.info(f"✅ Cortar en el orden original requería **{res_orig['tubos_comprados']} tubos**. La optimización {msg_tubos}{conector}{msg_desc}.")
         elif diff_tubos == 0 and diff_descarte == 0:
             st.info("⚖️ El orden original ingresado ya era igual de eficiente que la optimización.")
         else:
