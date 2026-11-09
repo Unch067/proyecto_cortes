@@ -1,4 +1,5 @@
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 def _crear_cubo_malla(x0, x1, y_centro, ancho_y, alto_z, color, hover_text, opacity=1.0):
     """
@@ -158,4 +159,153 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
         paper_bgcolor="rgba(0,0,0,0)"
     )
     
+    return fig
+
+from plotly.subplots import make_subplots
+
+def crear_grafico_balance_dona(bal):
+    """
+    Dona analítica con visualización de balance de masa y KPI central
+    de aprovechamiento útil en modo oscuro.
+    """
+    total_origen = bal.get("material_total_origen", 0)
+    incorporado = bal.get("incorporado", 0)
+    eficiencia = round((incorporado / total_origen * 100), 1) if total_origen > 0 else 0
+
+    etiquetas_todas = ["Material Incorporado", "Pérdida por Corte", "Descarte Inútil", "Retal Reutilizable"]
+    valores_todos = [incorporado, bal.get("perdida", 0), bal.get("descarte", 0), bal.get("nuevo_retal", 0)]
+    colores_map = {
+        "Material Incorporado": "#1E88E5",
+        "Pérdida por Corte": "#E53935",
+        "Descarte Inútil": "#78909C",
+        "Retal Reutilizable": "#FFB300"
+    }
+
+    labels = []
+    values = []
+    colors = []
+    pulls = []
+
+    for l, v in zip(etiquetas_todas, valores_todos):
+        if v > 0:
+            labels.append(l)
+            values.append(v)
+            colors.append(colores_map[l])
+            pulls.append(0.04 if l == "Material Incorporado" else 0.0)
+
+    fig = go.Figure()
+    fig.add_trace(go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.62,
+        pull=pulls,
+        marker=dict(colors=colors, line=dict(color="#0F172A", width=2)),
+        textinfo="percent+label",
+        textposition="outside",
+        textfont=dict(color="#F8FAFC", size=11),
+        hovertemplate="<b>%{label}</b><br>Longitud: %{value} mm<br>Proporción: %{percent}<extra></extra>"
+    ))
+
+    # Anotación central con el KPI de aprovechamiento
+    fig.update_layout(
+        annotations=[
+            dict(
+                text=f"<span style='font-size:11px;color:#94A3B8;'>APROVECHAMIENTO</span><br><b style='font-size:24px;color:#38BDF8;'>{eficiencia}%</b>",
+                x=0.5, y=0.5,
+                font_size=14,
+                showarrow=False
+            )
+        ],
+        showlegend=False,
+        height=360,
+        margin=dict(l=20, r=20, b=20, t=30),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)"
+    )
+    return fig
+
+
+def crear_grafico_comparativo_dual(res, res_orig):
+    """
+    Subplots desacoplados para comparar Tubos Nuevos y Descarte en mm
+    evitando distorsión de escala dimensional.
+    """
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=("Tubos Comerciales Necesarios", "Descarte Inútil (mm)"),
+        horizontal_spacing=0.18
+    )
+
+    # 1. Subplot: Tubos Nuevos
+    fig.add_trace(
+        go.Bar(
+            name="Optimizado (IA)",
+            x=["Tubos"],
+            y=[res["tubos_comprados"]],
+            marker_color="#10B981",
+            text=[f"{res['tubos_comprados']} u"],
+            textposition="auto",
+            hovertemplate="Optimizado: %{y} tubos<extra></extra>"
+        ),
+        row=1, col=1
+    )
+    fig.add_trace(
+        go.Bar(
+            name="Orden Original",
+            x=["Tubos"],
+            y=[res_orig["tubos_comprados"]],
+            marker_color="#EF4444",
+            text=[f"{res_orig['tubos_comprados']} u"],
+            textposition="auto",
+            hovertemplate="Original: %{y} tubos<extra></extra>"
+        ),
+        row=1, col=1
+    )
+
+    # 2. Subplot: Descarte Inútil (mm)
+    fig.add_trace(
+        go.Bar(
+            name="Optimizado (IA)",
+            x=["Descarte"],
+            y=[res["balance"]["descarte"]],
+            marker_color="#10B981",
+            text=[f"{res['balance']['descarte']} mm"],
+            textposition="auto",
+            showlegend=False,
+            hovertemplate="Optimizado: %{y} mm<extra></extra>"
+        ),
+        row=1, col=2
+    )
+    fig.add_trace(
+        go.Bar(
+            name="Orden Original",
+            x=["Descarte"],
+            y=[res_orig["balance"]["descarte"]],
+            marker_color="#EF4444",
+            text=[f"{res_orig['balance']['descarte']} mm"],
+            textposition="auto",
+            showlegend=False,
+            hovertemplate="Original: %{y} mm<extra></extra>"
+        ),
+        row=1, col=2
+    )
+
+    fig.update_layout(
+        barmode="group",
+        height=360,
+        margin=dict(l=10, r=10, b=20, t=50),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.12,
+            xanchor="center",
+            x=0.5,
+            font=dict(color="#F8FAFC")
+        ),
+        font=dict(color="#F8FAFC")
+    )
+    fig.update_xaxes(showgrid=False, color="#94A3B8")
+    fig.update_yaxes(showgrid=True, gridcolor="#334155", color="#94A3B8")
     return fig

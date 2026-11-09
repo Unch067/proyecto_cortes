@@ -4,7 +4,11 @@ import plotly.graph_objects as go
 import plotly.express as px
 from core.optimizador import optimizar_cortes
 from components.validaciones import validar_datos_entrada
-from components.graficos import crear_gemelo_digital_3d
+from components.graficos import (
+    crear_gemelo_digital_3d,
+    crear_grafico_balance_dona,
+    crear_grafico_comparativo_dual
+)
 
 st.set_page_config(page_title="Plan de Corte - Grupo 3", layout="wide")
 
@@ -160,7 +164,7 @@ with tab_res:
             st.warning("⚠️ Sin solución completa para las siguientes piezas:")
             st.dataframe(pd.DataFrame(res["pendientes"]))
             c3.download_button("Descargar Pendientes", pd.DataFrame(res["pendientes"]).to_csv(index=False).encode('utf-8'), "pendientes.csv", "text/csv")
-            
+
         # ==========================================
         # 3. GEMELO DIGITAL 3D (LAYOUT DE TALLER)
         # ==========================================
@@ -170,6 +174,22 @@ with tab_res:
 
         fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=kerf)
         st.plotly_chart(fig_3d, use_container_width=True)
+
+        # ==========================================
+        # 4. ANÁLISIS COMPARATIVO VISUAL (DONA Y SUBPLOTS)
+        # ==========================================
+        st.markdown("---")
+        st.subheader("📊 Análisis Visual Comparativo")
+        
+        col_graf_dona, col_graf_comp = st.columns(2)
+
+        with col_graf_dona:
+            fig_dona = crear_grafico_balance_dona(bal)
+            st.plotly_chart(fig_dona, use_container_width=True)
+
+        with col_graf_comp:
+            fig_comp = crear_grafico_comparativo_dual(res, res_orig)
+            st.plotly_chart(fig_comp, use_container_width=True)
 
     else:
         st.info("Ingrese sus datos en las pestañas anteriores y presione 'Calcular Optimización'.")
