@@ -7,7 +7,9 @@ from components.validaciones import validar_datos_entrada
 from components.graficos import (
     crear_gemelo_digital_3d,
     crear_grafico_balance_dona,
-    crear_grafico_comparativo_dual
+    crear_grafico_comparativo_dual,
+    crear_simulacion_paso_a_paso,
+    generar_reporte_texto
 )
 
 st.set_page_config(page_title="Plan de Corte - Grupo 3", layout="wide")
@@ -154,16 +156,19 @@ with tab_res:
         df_plan = pd.DataFrame(res["detalle_csv"])
         st.dataframe(df_plan, use_container_width=True)
         
-        # Exportaciones CSV
+        # Exportaciones CSV e Informe Técnico
         st.subheader("Exportar Resultados")
-        c1, c2, c3 = st.columns(3)
-        c1.download_button("Descargar Plan", df_plan.to_csv(index=False).encode('utf-8'), "plan.csv", "text/csv")
-        c2.download_button("Descargar Balance", pd.DataFrame([bal]).to_csv(index=False).encode('utf-8'), "balance.csv", "text/csv")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.download_button("Descargar Plan (CSV)", df_plan.to_csv(index=False).encode('utf-8'), "plan.csv", "text/csv")
+        c2.download_button("Descargar Balance (CSV)", pd.DataFrame([bal]).to_csv(index=False).encode('utf-8'), "balance.csv", "text/csv")
         
+        texto_reporte = generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral)
+        c3.download_button("Descargar Informe Técnico", texto_reporte.encode('utf-8'), "informe_tecnico_corte.txt", "text/plain")
+
         if res["pendientes"]:
             st.warning("⚠️ Sin solución completa para las siguientes piezas:")
             st.dataframe(pd.DataFrame(res["pendientes"]))
-            c3.download_button("Descargar Pendientes", pd.DataFrame(res["pendientes"]).to_csv(index=False).encode('utf-8'), "pendientes.csv", "text/csv")
+            c4.download_button("Descargar Pendientes", pd.DataFrame(res["pendientes"]).to_csv(index=False).encode('utf-8'), "pendientes.csv", "text/csv")
 
         # ==========================================
         # 3. GEMELO DIGITAL 3D (LAYOUT DE TALLER)
@@ -174,6 +179,34 @@ with tab_res:
 
         fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=kerf)
         st.plotly_chart(fig_3d, use_container_width=True)
+
+        # ==========================================
+        # 3.1 SIMULADOR DE CORTE PASO A PASO
+        # ==========================================
+        st.markdown("---")
+        st.subheader("⚙️ Simulador de Taller: Avance de Corte")
+        st.write("Selecciona una barra y desplaza el carro de la sierra para simular el proceso físico de seccionamiento:")
+
+        lista_origenes = [f["Origen_ID"] for f in res["detalle_csv"]]
+        col_sel_barra, col_slider = st.columns([1, 3])
+
+        with col_sel_barra:
+            barra_sel_id = st.selectbox("Barra a simular:", lista_origenes, key="sel_sim_barra")
+            fila_sel = next(f for f in res["detalle_csv"] if f["Origen_ID"] == barra_sel_id)
+            st.caption(f"**Longitud inicial:** {fila_sel['Longitud_Inicial']} mm")
+            st.caption(f"**Piezas a extraer:** {fila_sel['Piezas_Asignadas']}")
+
+        with col_slider:
+            cota_disco = st.slider(
+                "Posición del disco de corte (mm):",
+                min_value=0,
+                max_value=int(fila_sel["Longitud_Inicial"]),
+                value=int(fila_sel["Longitud_Inicial"]),
+                step=10,
+                key=f"slider_{barra_sel_id}"
+            )
+            fig_sim = crear_simulacion_paso_a_paso(fila_sel, cota_disco, kerf_nominal=kerf)
+            st.plotly_chart(fig_sim, use_container_width=True)
 
         # ==========================================
         # 4. ANÁLISIS COMPARATIVO VISUAL (DONA Y SUBPLOTS)
