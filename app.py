@@ -165,15 +165,13 @@ with tab_res:
         # ==========================================
         st.markdown("---")
         st.subheader("📐 Layout de Taller: Diagrama de Corte")
-        st.write("Simulación física de los cortes. Pasa el mouse para ver las medidas exactas:")
+        st.write("Simulación física de los cortes. Pasa el mouse sobre las barras para ver las medidas exactas:")
 
         fig_layout = go.Figure()
 
-        # Dibujar cada tubo/retal
         for fila in res["detalle_csv"]:
             origen = fila["Origen_ID"]
             x_actual = 0
-            
             piezas_str = fila["Piezas_Asignadas"].split(" | ") if fila["Piezas_Asignadas"] else []
             
             for p in piezas_str:
@@ -181,24 +179,25 @@ with tab_res:
                     nombre = p.split("(")[0]
                     largo = int(p.split("(")[1].replace(")", ""))
                     
-                    # Barra para la pieza
+                    # Barra para la pieza (Solo muestra texto si es mayor a 500mm)
                     fig_layout.add_trace(go.Bar(
                         y=[origen], x=[largo], base=x_actual, orientation='h',
                         name='Pieza Útil', marker_color='#3498DB',
-                        text=f"{nombre}", textposition='inside',
-                        hovertemplate=f"Pieza: {nombre}<br>Longitud: {largo}mm<extra></extra>"
+                        text=nombre if largo >= 500 else '', 
+                        textposition='inside',
+                        textfont=dict(color='white', size=12),
+                        hovertemplate=f"<b>Pieza:</b> {nombre}<br><b>Longitud:</b> {largo} mm<extra></extra>"
                     ))
                     x_actual += largo
                     
-                    # Barra del Kerf (Pérdida)
-                    if fila["Kerf_Total"] > 0 and len(piezas_str) > 1:
+                    # El Kerf (Representado como un pequeño bloque rojo)
+                    if x_actual < fila["Longitud_Inicial"]: 
                         fig_layout.add_trace(go.Bar(
-                            y=[origen], x=[fila["Kerf_Total"]/len(piezas_str)], base=x_actual, orientation='h',
-                            name='Pérdida por Corte', marker_color='#E74C3C',
-                            hoverinfo='skip'  # Ocultamos el hover para no saturar
+                            y=[origen], x=[4], base=x_actual, orientation='h',  # Usamos 4mm fijos visuales
+                            name='Corte (Kerf)', marker_color='#E74C3C',
+                            hovertemplate="<b>Corte:</b> 4 mm<extra></extra>"
                         ))
-                        # Solo sumamos el kerf visualmente una vez por pieza cortada
-                        x_actual += (fila["Kerf_Total"]/len(piezas_str))
+                        x_actual += 4
 
             # Sobrante final
             if fila["Sobrante_mm"] > 0:
@@ -207,21 +206,20 @@ with tab_res:
                     y=[origen], x=[fila["Sobrante_mm"]], base=x_actual, orientation='h',
                     name='Sobrante', marker_color=color_sob,
                     text=f"{fila['Sobrante_mm']} mm", textposition='inside',
-                    hovertemplate=f"Sobrante: {fila['Sobrante_mm']}mm<br>Tipo: {fila['Clasificacion']}<extra></extra>"
+                    textfont=dict(color='black', size=12),
+                    hovertemplate=f"<b>Sobrante:</b> {fila['Sobrante_mm']} mm<br><b>Tipo:</b> {fila['Clasificacion']}<extra></extra>"
                 ))
 
-        # Estilos visuales para que parezca un software de ingeniería
         fig_layout.update_layout(
             barmode='stack',
             xaxis_title="Longitud Total (mm)",
             yaxis_title="",
-            height=350,
+            height=300,
             margin=dict(l=0, r=0, b=20, t=20),
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            plot_bgcolor='rgba(0,0,0,0)',  # Fondo transparente
+            showlegend=False,  # Ocultamos la leyenda que estorbaba
+            plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            xaxis=dict(showgrid=True, gridcolor='#444', zeroline=False),
+            xaxis=dict(showgrid=True, gridcolor='#333', zeroline=False),
             yaxis=dict(showgrid=False)
         )
         st.plotly_chart(fig_layout, use_container_width=True)
@@ -246,7 +244,7 @@ with tab_res:
                 title="Balance de Materiales",
                 color_discrete_sequence=px.colors.qualitative.Pastel
             )
-            fig_pie.update_traces(textposition='inside', textinfo='percent+label', marker=dict(line=dict(color='#000', width=2)))
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
             fig_pie.update_layout(height=350, margin=dict(l=0, r=0, b=0, t=40), showlegend=False)
             st.plotly_chart(fig_pie, use_container_width=True)
 
@@ -263,7 +261,7 @@ with tab_res:
                 margin=dict(l=0, r=0, b=0, t=40),
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
-                yaxis=dict(showgrid=True, gridcolor='#444')
+                yaxis=dict(showgrid=True, gridcolor='#333')
             )
             st.plotly_chart(fig_comp, use_container_width=True)
 
