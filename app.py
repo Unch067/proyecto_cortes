@@ -170,25 +170,25 @@ with tab_res:
         col_graf1, col_graf2 = st.columns(2)
         
         with col_graf1:
-            # 1. Gráfico 3D de Aprovechamiento (Barras 3D)
+            # 1. Gráfico 3D de Aprovechamiento
             origenes = [fila["Origen_ID"] for fila in res["detalle_csv"]]
             sobrantes = [fila["Sobrante_mm"] for fila in res["detalle_csv"]]
             usados = [fila["Longitud_Inicial"] - fila["Sobrante_mm"] for fila in res["detalle_csv"]]
             
-            fig_3d = go.Figure(data=[
-                go.Bar(name='Material Usado (mm)', x=origenes, y=['Usado']*len(origenes), z=usados, marker_color='#2E86C1'),
-                go.Bar(name='Sobrante / Descarte (mm)', x=origenes, y=['Sobrante']*len(origenes), z=sobrantes, marker_color='#E74C3C')
-            ])
-            
+            fig_3d = px.scatter_3d(
+                x=origenes, 
+                y=usados, 
+                z=sobrantes, 
+                color=origenes,
+                size=[30]*len(origenes), # Tamaño de los puntos
+                title="Aprovechamiento por Tubo (3D)"
+            )
             fig_3d.update_layout(
-                title="Aprovechamiento por Tubo/Retal (3D)",
                 scene=dict(
                     xaxis_title='Origen',
-                    yaxis_title='Estado',
-                    zaxis_title='Milímetros',
-                    camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
+                    yaxis_title='Material Usado (mm)',
+                    zaxis_title='Sobrante (mm)'
                 ),
-                barmode='group',
                 height=450,
                 margin=dict(l=0, r=0, b=0, t=40)
             )
