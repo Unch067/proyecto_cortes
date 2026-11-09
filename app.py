@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from core.optimizador import optimizar_cortes
 from components.validaciones import validar_datos_entrada
+from components.graficos import crear_gemelo_digital_3d
 
 st.set_page_config(page_title="Plan de Corte - Grupo 3", layout="wide")
 
@@ -159,111 +160,16 @@ with tab_res:
             st.warning("⚠️ Sin solución completa para las siguientes piezas:")
             st.dataframe(pd.DataFrame(res["pendientes"]))
             c3.download_button("Descargar Pendientes", pd.DataFrame(res["pendientes"]).to_csv(index=False).encode('utf-8'), "pendientes.csv", "text/csv")
-
+            
         # ==========================================
-        # 3. GEMELO DIGITAL Y VISUALIZACIONES (LAYOUT DE TALLER)
+        # 3. GEMELO DIGITAL 3D (LAYOUT DE TALLER)
         # ==========================================
         st.markdown("---")
-        st.subheader("📐 Layout de Taller: Diagrama de Corte")
-        st.write("Simulación física de los cortes. Pasa el mouse sobre las barras para ver las medidas exactas:")
+        st.subheader("📐 Gemelo Digital 3D: Layout de Taller")
+        st.write("Simulación volumétrica de los tubos y cortes. **Gira, rota o amplía** el modelo con el cursor:")
 
-        fig_layout = go.Figure()
-
-        for fila in res["detalle_csv"]:
-            origen = fila["Origen_ID"]
-            x_actual = 0
-            piezas_str = fila["Piezas_Asignadas"].split(" | ") if fila["Piezas_Asignadas"] else []
-            
-            for p in piezas_str:
-                if "(" in p:
-                    nombre = p.split("(")[0]
-                    largo = int(p.split("(")[1].replace(")", ""))
-                    
-                    # Barra para la pieza (Solo muestra texto si es mayor a 500mm)
-                    fig_layout.add_trace(go.Bar(
-                        y=[origen], x=[largo], base=x_actual, orientation='h',
-                        name='Pieza Útil', marker_color='#3498DB',
-                        text=nombre if largo >= 500 else '', 
-                        textposition='inside',
-                        textfont=dict(color='white', size=12),
-                        hovertemplate=f"<b>Pieza:</b> {nombre}<br><b>Longitud:</b> {largo} mm<extra></extra>"
-                    ))
-                    x_actual += largo
-                    
-                    # El Kerf (Representado como un pequeño bloque rojo)
-                    if x_actual < fila["Longitud_Inicial"]: 
-                        fig_layout.add_trace(go.Bar(
-                            y=[origen], x=[4], base=x_actual, orientation='h',  # Usamos 4mm fijos visuales
-                            name='Corte (Kerf)', marker_color='#E74C3C',
-                            hovertemplate="<b>Corte:</b> 4 mm<extra></extra>"
-                        ))
-                        x_actual += 4
-
-            # Sobrante final
-            if fila["Sobrante_mm"] > 0:
-                color_sob = '#F1C40F' if fila["Clasificacion"] == "Retal Reutilizable" else '#95A5A6'
-                fig_layout.add_trace(go.Bar(
-                    y=[origen], x=[fila["Sobrante_mm"]], base=x_actual, orientation='h',
-                    name='Sobrante', marker_color=color_sob,
-                    text=f"{fila['Sobrante_mm']} mm", textposition='inside',
-                    textfont=dict(color='black', size=12),
-                    hovertemplate=f"<b>Sobrante:</b> {fila['Sobrante_mm']} mm<br><b>Tipo:</b> {fila['Clasificacion']}<extra></extra>"
-                ))
-
-        fig_layout.update_layout(
-            barmode='stack',
-            xaxis_title="Longitud Total (mm)",
-            yaxis_title="",
-            height=300,
-            margin=dict(l=0, r=0, b=20, t=20),
-            showlegend=False,  # Ocultamos la leyenda que estorbaba
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            xaxis=dict(showgrid=True, gridcolor='#333', zeroline=False),
-            yaxis=dict(showgrid=False)
-        )
-        st.plotly_chart(fig_layout, use_container_width=True)
-
-        # ==========================================
-        # 4. ANÁLISIS COMPARATIVO (Dona y Barras)
-        # ==========================================
-        st.markdown("---")
-        st.subheader("📊 Análisis Visual Comparativo")
-        
-        col_graf2, col_graf3 = st.columns(2)
-
-        with col_graf2:
-            # Dona de Balance
-            labels = ["Material Incorporado", "Pérdida por Corte", "Descarte Inútil", "Retal Reutilizable"]
-            values = [bal["incorporado"], bal["perdida"], bal["descarte"], bal["nuevo_retal"]]
-            labels_filtrados = [l for l, v in zip(labels, values) if v > 0]
-            values_filtrados = [v for v in values if v > 0]
-            
-            fig_pie = px.pie(
-                names=labels_filtrados, values=values_filtrados, hole=0.5,
-                title="Balance de Materiales",
-                color_discrete_sequence=px.colors.qualitative.Pastel
-            )
-            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-            fig_pie.update_layout(height=350, margin=dict(l=0, r=0, b=0, t=40), showlegend=False)
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-        with col_graf3:
-            # Barras Comparativas
-            fig_comp = go.Figure(data=[
-                go.Bar(name='Optimizado', x=['Tubos Nuevos', 'Descarte (mm)'], y=[res["tubos_comprados"], bal["descarte"]], marker_color='#2ECC71', text=[res["tubos_comprados"], bal["descarte"]], textposition='auto'),
-                go.Bar(name='Orden Original', x=['Tubos Nuevos', 'Descarte (mm)'], y=[res_orig["tubos_comprados"], res_orig["balance"]["descarte"]], marker_color='#E74C3C', text=[res_orig["tubos_comprados"], res_orig["balance"]["descarte"]], textposition='auto')
-            ])
-            fig_comp.update_layout(
-                title="Eficiencia del Algoritmo",
-                barmode='group',
-                height=350,
-                margin=dict(l=0, r=0, b=0, t=40),
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                yaxis=dict(showgrid=True, gridcolor='#333')
-            )
-            st.plotly_chart(fig_comp, use_container_width=True)
+        fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=kerf)
+        st.plotly_chart(fig_3d, use_container_width=True)
 
     else:
         st.info("Ingrese sus datos en las pestañas anteriores y presione 'Calcular Optimización'.")
