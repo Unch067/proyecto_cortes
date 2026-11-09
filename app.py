@@ -161,16 +161,16 @@ with tab_res:
             c3.download_button("Descargar Pendientes", pd.DataFrame(res["pendientes"]).to_csv(index=False).encode('utf-8'), "pendientes.csv", "text/csv")
 
         # ==========================================
-        # 3. GEMELO DIGITAL Y VISUALIZACIONES 3D
+        # 3. GEMELO DIGITAL Y VISUALIZACIONES (LAYOUT DE TALLER)
         # ==========================================
         st.markdown("---")
-        st.subheader("📐 Layout de Taller: Diagrama de Corte (Volumen 3D)")
-        st.write("Visualización física e interactiva. Usa el mouse para **rotar** los tubos y ver su profundidad:")
+        st.subheader("📐 Layout de Taller: Diagrama de Corte")
+        st.write("Simulación física de los cortes. Pasa el mouse para ver las medidas exactas:")
 
-        # --- GRÁFICO 3D DE BARRAS (Efecto Tubo) ---
-        fig_3d = go.Figure()
+        fig_layout = go.Figure()
 
-        for idx, fila in enumerate(res["detalle_csv"]):
+        # Dibujar cada tubo/retal
+        for fila in res["detalle_csv"]:
             origen = fila["Origen_ID"]
             x_actual = 0
             
@@ -181,53 +181,50 @@ with tab_res:
                     nombre = p.split("(")[0]
                     largo = int(p.split("(")[1].replace(")", ""))
                     
-                    # Barra 3D para la pieza
-                    fig_3d.add_trace(go.Bar3d(
-                        x=[origen], y=[0], z=[x_actual + largo/2], 
-                        dx=[0.4], dy=[0.4], dz=[largo], 
-                        name='Pieza Útil', 
-                        colorscale=[[0, '#2E86C1'], [1, '#2E86C1']],
-                        showlegend=False,
-                        hovertemplate=f"Pieza: {nombre}<br>Largo: {largo}mm<extra></extra>"
+                    # Barra para la pieza
+                    fig_layout.add_trace(go.Bar(
+                        y=[origen], x=[largo], base=x_actual, orientation='h',
+                        name='Pieza Útil', marker_color='#3498DB',
+                        text=f"{nombre}", textposition='inside',
+                        hovertemplate=f"Pieza: {nombre}<br>Longitud: {largo}mm<extra></extra>"
                     ))
                     x_actual += largo
                     
-                    # Marcador del Kerf (un cubo rojo pequeño)
-                    if fila["Kerf_Total"] > 0:
-                        fig_3d.add_trace(go.Bar3d(
-                            x=[origen], y=[0], z=[x_actual + fila["Kerf_Total"]/2], 
-                            dx=[0.4], dy=[0.4], dz=[fila["Kerf_Total"]], 
-                            name='Kerf', 
-                            colorscale=[[0, '#E74C3C'], [1, '#E74C3C']],
-                            showlegend=False,
-                            hovertemplate=f"Pérdida por corte: {fila['Kerf_Total']}mm<extra></extra>"
+                    # Barra del Kerf (Pérdida)
+                    if fila["Kerf_Total"] > 0 and len(piezas_str) > 1:
+                        fig_layout.add_trace(go.Bar(
+                            y=[origen], x=[fila["Kerf_Total"]/len(piezas_str)], base=x_actual, orientation='h',
+                            name='Pérdida por Corte', marker_color='#E74C3C',
+                            hoverinfo='skip'  # Ocultamos el hover para no saturar
                         ))
-                        x_actual += fila["Kerf_Total"]
+                        # Solo sumamos el kerf visualmente una vez por pieza cortada
+                        x_actual += (fila["Kerf_Total"]/len(piezas_str))
 
-            # Barra 3D para el sobrante
+            # Sobrante final
             if fila["Sobrante_mm"] > 0:
                 color_sob = '#F1C40F' if fila["Clasificacion"] == "Retal Reutilizable" else '#95A5A6'
-                fig_3d.add_trace(go.Bar3d(
-                    x=[origen], y=[0], z=[x_actual + fila["Sobrante_mm"]/2], 
-                    dx=[0.4], dy=[0.4], dz=[fila["Sobrante_mm"]], 
-                    name='Sobrante', 
-                    colorscale=[[0, color_sob], [1, color_sob]],
-                    showlegend=False,
-                    hovertemplate=f"{fila['Clasificacion']}: {fila['Sobrante_mm']}mm<extra></extra>"
+                fig_layout.add_trace(go.Bar(
+                    y=[origen], x=[fila["Sobrante_mm"]], base=x_actual, orientation='h',
+                    name='Sobrante', marker_color=color_sob,
+                    text=f"{fila['Sobrante_mm']} mm", textposition='inside',
+                    hovertemplate=f"Sobrante: {fila['Sobrante_mm']}mm<br>Tipo: {fila['Clasificacion']}<extra></extra>"
                 ))
 
-        # Ajustar la vista 3D
-        fig_3d.update_layout(
-            scene=dict(
-                xaxis_title='Origen',
-                yaxis_title='Profundidad',
-                zaxis_title='Longitud (mm)',
-                camera=dict(eye=dict(x=1.5, y=-1.5, z=1.5)) # Vista de pájaro
-            ),
-            height=450,
-            margin=dict(l=0, r=0, b=0, t=20)
+        # Estilos visuales para que parezca un software de ingeniería
+        fig_layout.update_layout(
+            barmode='stack',
+            xaxis_title="Longitud Total (mm)",
+            yaxis_title="",
+            height=350,
+            margin=dict(l=0, r=0, b=20, t=20),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            plot_bgcolor='rgba(0,0,0,0)',  # Fondo transparente
+            paper_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(showgrid=True, gridcolor='#444', zeroline=False),
+            yaxis=dict(showgrid=False)
         )
-        st.plotly_chart(fig_3d, use_container_width=True)
+        st.plotly_chart(fig_layout, use_container_width=True)
 
         # ==========================================
         # 4. ANÁLISIS COMPARATIVO (Dona y Barras)
@@ -245,25 +242,28 @@ with tab_res:
             values_filtrados = [v for v in values if v > 0]
             
             fig_pie = px.pie(
-                names=labels_filtrados, values=values_filtrados, hole=0.4,
+                names=labels_filtrados, values=values_filtrados, hole=0.5,
                 title="Balance de Materiales",
-                color_discrete_sequence=px.colors.qualitative.Set3
+                color_discrete_sequence=px.colors.qualitative.Pastel
             )
-            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-            fig_pie.update_layout(height=350, margin=dict(l=0, r=0, b=0, t=40))
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label', marker=dict(line=dict(color='#000', width=2)))
+            fig_pie.update_layout(height=350, margin=dict(l=0, r=0, b=0, t=40), showlegend=False)
             st.plotly_chart(fig_pie, use_container_width=True)
 
         with col_graf3:
             # Barras Comparativas
             fig_comp = go.Figure(data=[
-                go.Bar(name='Optimizado', x=['Tubos Nuevos', 'Descarte (mm)'], y=[res["tubos_comprados"], bal["descarte"]], marker_color='#2ECC71'),
-                go.Bar(name='Orden Original', x=['Tubos Nuevos', 'Descarte (mm)'], y=[res_orig["tubos_comprados"], res_orig["balance"]["descarte"]], marker_color='#E74C3C')
+                go.Bar(name='Optimizado', x=['Tubos Nuevos', 'Descarte (mm)'], y=[res["tubos_comprados"], bal["descarte"]], marker_color='#2ECC71', text=[res["tubos_comprados"], bal["descarte"]], textposition='auto'),
+                go.Bar(name='Orden Original', x=['Tubos Nuevos', 'Descarte (mm)'], y=[res_orig["tubos_comprados"], res_orig["balance"]["descarte"]], marker_color='#E74C3C', text=[res_orig["tubos_comprados"], res_orig["balance"]["descarte"]], textposition='auto')
             ])
             fig_comp.update_layout(
                 title="Eficiencia del Algoritmo",
                 barmode='group',
                 height=350,
-                margin=dict(l=0, r=0, b=0, t=40)
+                margin=dict(l=0, r=0, b=0, t=40),
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                yaxis=dict(showgrid=True, gridcolor='#444')
             )
             st.plotly_chart(fig_comp, use_container_width=True)
 
