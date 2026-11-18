@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
 from core.optimizador import optimizar_cortes
-from components.validaciones import validar_datos_entrada
+from components.validaciones import validar_datos_entrada, cargar_csv_datos
 from components.graficos import (
     crear_gemelo_digital_3d,
     crear_grafico_balance_dona,
@@ -11,6 +9,13 @@ from components.graficos import (
     crear_simulacion_paso_a_paso,
     generar_reporte_texto
 )
+
+# ==========================================
+# PARÁMETROS BASE CENTRALIZADOS
+# ==========================================
+DEFAULT_L_COMERCIAL = 6000
+DEFAULT_KERF = 4
+DEFAULT_UMBRAL = 200
 
 st.set_page_config(page_title="OptiCorte 1D - Plan de Corte", layout="wide")
 
@@ -48,6 +53,14 @@ if "resultados" not in st.session_state:
     st.session_state.resultados = None
 if "res_original" not in st.session_state:
     st.session_state.res_original = None
+if "csv_inv_firma" not in st.session_state:
+    st.session_state.csv_inv_firma = None
+if "csv_ped_firma" not in st.session_state:
+    st.session_state.csv_ped_firma = None
+if "ver_editor_inv" not in st.session_state:
+    st.session_state.ver_editor_inv = 0
+if "ver_editor_ped" not in st.session_state:
+    st.session_state.ver_editor_ped = 0
 
 st.title("📐 OptiCorte 1D | Optimización y Aprovechamiento de Retales")
 st.caption("Herramienta de control de descarte, balance de masa y layout de taller · Grupo 3")
@@ -60,16 +73,35 @@ tab_conf, tab_inv, tab_ped, tab_res = st.tabs(["⚙️ Configuración", "📦 In
 with tab_conf:
     st.subheader("Parámetros del Proyecto")
     col1, col2, col3 = st.columns(3)
-    l_comercial = col1.number_input("Tubo Nuevo (mm)", min_value=1000, value=6000, step=1, key="cfg_tubo")
-    kerf = col2.number_input("Pérdida por corte (mm)", min_value=0, value=4, step=1, key="cfg_kerf")
-    umbral = col3.number_input("Retal Mínimo (mm)", min_value=0, value=200, step=1, key="cfg_umbral")
+    l_comercial = int(col1.number_input("Tubo Nuevo (mm)", min_value=1000, value=DEFAULT_L_COMERCIAL, step=1, key="cfg_tubo"))
+    kerf = int(col2.number_input("Pérdida por corte (mm)", min_value=0, value=DEFAULT_KERF, step=1, key="cfg_kerf"))
+    umbral = int(col3.number_input("Retal Mínimo (mm)", min_value=0, value=DEFAULT_UMBRAL, step=1, key="cfg_umbral"))
 
 with tab_inv:
     st.subheader("Retales Disponibles en Obra")
+    archivo_inv = st.file_uploader(
+        "📂 Cargar retales desde CSV (columnas: ID_Retal, Longitud_mm, Cantidad · delimitador ',' o ';')",
+        type=["csv"],
+        key="uploader_inv"
+    )
+    if archivo_inv is not None:
+        firma_inv = (archivo_inv.name, archivo_inv.size)
+        if firma_inv != st.session_state.csv_inv_firma:
+            df_csv_inv, err_inv = cargar_csv_datos(archivo_inv, tipo="inventario")
+            if err_inv:
+                st.error(err_inv)
+            else:
+                st.session_state.inventario = df_csv_inv
+                st.session_state.csv_inv_firma = firma_inv
+                st.session_state.ver_editor_inv += 1
+                st.success("Inventario cargado correctamente desde CSV.")
+    else:
+        st.session_state.csv_inv_firma = None
+
     st.session_state.inventario = st.data_editor(
         st.session_state.inventario,
         num_rows="dynamic",
-        key="editor_inv",
+        key=f"editor_inv_{st.session_state.ver_editor_inv}",
         column_config={
             "ID_Retal": st.column_config.TextColumn("ID Retal", required=True),
             "Longitud_mm": st.column_config.NumberColumn("Longitud (mm)", min_value=1, step=1, required=True),
@@ -79,10 +111,29 @@ with tab_inv:
 
 with tab_ped:
     st.subheader("Piezas Requeridas")
+    archivo_ped = st.file_uploader(
+        "📂 Cargar pedidos desde CSV (columnas: ID_Pieza, Longitud_mm, Cantidad · delimitador ',' o ';')",
+        type=["csv"],
+        key="uploader_ped"
+    )
+    if archivo_ped is not None:
+        firma_ped = (archivo_ped.name, archivo_ped.size)
+        if firma_ped != st.session_state.csv_ped_firma:
+            df_csv_ped, err_ped = cargar_csv_datos(archivo_ped, tipo="pedidos")
+            if err_ped:
+                st.error(err_ped)
+            else:
+                st.session_state.pedidos = df_csv_ped
+                st.session_state.csv_ped_firma = firma_ped
+                st.session_state.ver_editor_ped += 1
+                st.success("Pedidos cargados correctamente desde CSV.")
+    else:
+        st.session_state.csv_ped_firma = None
+
     st.session_state.pedidos = st.data_editor(
         st.session_state.pedidos,
         num_rows="dynamic",
-        key="editor_ped",
+        key=f"editor_ped_{st.session_state.ver_editor_ped}",
         column_config={
             "ID_Pieza": st.column_config.TextColumn("ID Pieza", required=True),
             "Longitud_mm": st.column_config.NumberColumn("Longitud (mm)", min_value=1, step=1, required=True),
@@ -95,25 +146,23 @@ with tab_ped:
         
         if not es_valido:
             st.error(msg)
-            st.stop()
-            
-        try:
-            # 1. Animación de carga (Spinner)
-            with st.spinner("Optimizando cortes y calculando balance de material..."):
-                st.session_state.resultados = optimizar_cortes(
-                    st.session_state.inventario, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=False
-                )
-                st.session_state.res_original = optimizar_cortes(
-                    st.session_state.inventario, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=True
-                )
-            
-            # 2. Mensajes de éxito flotantes
-            st.success("¡Cálculo exitoso! Ve a la pestaña Resultados.")
-            st.toast("Cortes optimizados correctamente 🎯")
-            
-        except Exception as e:
-            st.error(f"⚠️ Ocurrió un error inesperado en el motor de optimización: {str(e)}")
-            st.stop()
+        else:
+            try:
+                # 1. Animación de carga (Spinner)
+                with st.spinner("Optimizando cortes y calculando balance de material..."):
+                    st.session_state.resultados = optimizar_cortes(
+                        st.session_state.inventario, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=False
+                    )
+                    st.session_state.res_original = optimizar_cortes(
+                        st.session_state.inventario, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=True
+                    )
+                
+                # 2. Mensajes de éxito flotantes
+                st.success("¡Cálculo exitoso! Ve a la pestaña Resultados.")
+                st.toast("Cortes optimizados correctamente 🎯")
+                
+            except Exception as e:
+                st.error(f"⚠️ Ocurrió un error inesperado en el motor de optimización: {str(e)}")
 
 with tab_res:
     if st.session_state.resultados:
@@ -182,40 +231,43 @@ with tab_res:
         # ==========================================
         # 3. GEMELO DIGITAL 3D (LAYOUT DE TALLER)
         # ==========================================
-        st.markdown("---")
-        st.subheader("📐 Gemelo Digital 3D: Layout de Taller")
-        st.write("Simulación volumétrica de los tubos y cortes. **Gira, rota o amplía** el modelo con el cursor:")
+        if res["detalle_csv"]:
+            st.markdown("---")
+            st.subheader("📐 Gemelo Digital 3D: Layout de Taller")
+            st.write("Simulación volumétrica de los tubos y cortes. **Gira, rota o amplía** el modelo con el cursor:")
 
-        fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=kerf)
-        st.plotly_chart(fig_3d, use_container_width=True)
+            fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=kerf)
+            st.plotly_chart(fig_3d, use_container_width=True)
 
-        # ==========================================
-        # 3.1 SIMULADOR DE CORTE PASO A PASO
-        # ==========================================
-        st.markdown("---")
-        st.subheader("⚙️ Simulador de Taller: Avance de Corte")
-        st.write("Selecciona una barra y desplaza el carro de la sierra para simular el proceso físico de seccionamiento:")
+            # ==========================================
+            # 3.1 SIMULADOR DE CORTE PASO A PASO
+            # ==========================================
+            st.markdown("---")
+            st.subheader("⚙️ Simulador de Taller: Avance de Corte")
+            st.write("Selecciona una barra y desplaza el carro de la sierra para simular el proceso físico de seccionamiento:")
 
-        lista_origenes = [f["Origen_ID"] for f in res["detalle_csv"]]
-        col_sel_barra, col_slider = st.columns([1, 3])
+            lista_origenes = [f["Origen_ID"] for f in res["detalle_csv"]]
+            col_sel_barra, col_slider = st.columns([1, 3])
 
-        with col_sel_barra:
-            barra_sel_id = st.selectbox("Barra a simular:", lista_origenes, key="sel_sim_barra")
-            fila_sel = next(f for f in res["detalle_csv"] if f["Origen_ID"] == barra_sel_id)
-            st.caption(f"**Longitud inicial:** {fila_sel['Longitud_Inicial']} mm")
-            st.caption(f"**Piezas a extraer:** {fila_sel['Piezas_Asignadas']}")
+            with col_sel_barra:
+                barra_sel_id = st.selectbox("Barra a simular:", lista_origenes, key="sel_sim_barra")
+                fila_sel = next((f for f in res["detalle_csv"] if f["Origen_ID"] == barra_sel_id), res["detalle_csv"][0])
+                st.caption(f"**Longitud inicial:** {fila_sel['Longitud_Inicial']} mm")
+                st.caption(f"**Piezas a extraer:** {fila_sel['Piezas_Asignadas']}")
 
-        with col_slider:
-            cota_disco = st.slider(
-                "Posición del disco de corte (mm):",
-                min_value=0,
-                max_value=int(fila_sel["Longitud_Inicial"]),
-                value=int(fila_sel["Longitud_Inicial"]),
-                step=10,
-                key=f"slider_{barra_sel_id}"
-            )
-            fig_sim = crear_simulacion_paso_a_paso(fila_sel, cota_disco, kerf_nominal=kerf)
-            st.plotly_chart(fig_sim, use_container_width=True)
+            with col_slider:
+                cota_disco = st.slider(
+                    "Posición del disco de corte (mm):",
+                    min_value=0,
+                    max_value=int(fila_sel["Longitud_Inicial"]),
+                    value=int(fila_sel["Longitud_Inicial"]),
+                    step=10,
+                    key=f"slider_{barra_sel_id}"
+                )
+                fig_sim = crear_simulacion_paso_a_paso(fila_sel, cota_disco, kerf_nominal=kerf)
+                st.plotly_chart(fig_sim, use_container_width=True)
+        else:
+            st.info("No se registraron cortes activos en el plan actual.")
 
         # ==========================================
         # 4. ANÁLISIS COMPARATIVO VISUAL (DONA Y SUBPLOTS)

@@ -1,7 +1,15 @@
+import io
 import unittest
+from unittest.mock import MagicMock
 import pandas as pd
 from core.optimizador import optimizar_cortes
-from components.validaciones import validar_datos_entrada
+from components.validaciones import validar_datos_entrada, cargar_csv_datos
+import components.graficos as graficos_mod
+from components.graficos import (
+    crear_gemelo_digital_3d,
+    crear_simulacion_paso_a_paso,
+    generar_reporte_texto
+)
 
 
 class TestOptimizadorCortes(unittest.TestCase):
@@ -21,9 +29,11 @@ class TestOptimizadorCortes(unittest.TestCase):
         ])
         res = optimizar_cortes(df_ret, df_ped, self.l_comercial, self.kerf, self.umbral)
         self.assertEqual(res["tubos_comprados"], 1)
+        self.assertEqual(res["balance"]["material_total_origen"], 9000)
+        self.assertEqual(res["balance"]["incorporado"], 8600)
+        self.assertEqual(res["balance"]["perdida"], 16)
         self.assertEqual(res["balance"]["descarte"], 96)
         self.assertEqual(res["balance"]["nuevo_retal"], 288)
-        self.assertEqual(res["balance"]["perdida"], 16)
         self.assertTrue(res["balance"]["cuadra_perfecto"])
 
     def test_caso_comprobacion_material_total(self):
@@ -56,6 +66,14 @@ class TestOptimizadorCortes(unittest.TestCase):
         res = optimizar_cortes(pd.DataFrame(), df_ped, self.l_comercial, self.kerf, self.umbral)
         self.assertEqual(res["balance"]["nuevo_retal"], 200)
         self.assertEqual(res["balance"]["descarte"], 0)
+        self.assertEqual(res["detalle_csv"][0]["Clasificacion"], "Retal Reutilizable")
+
+    def test_sobrante_limite_inferior_199_es_descarte(self):
+        df_ped = pd.DataFrame([{"ID_Pieza": "P1", "Longitud_mm": 5797, "Cantidad": 1}])
+        res = optimizar_cortes(pd.DataFrame(), df_ped, self.l_comercial, self.kerf, self.umbral)
+        self.assertEqual(res["balance"]["nuevo_retal"], 0)
+        self.assertEqual(res["balance"]["descarte"], 199)
+        self.assertEqual(res["detalle_csv"][0]["Clasificacion"], "Descarte")
 
     def test_sobrante_exactamente_cero(self):
         df_ped = pd.DataFrame([{"ID_Pieza": "P1", "Longitud_mm": 6000, "Cantidad": 1}])
@@ -139,6 +157,140 @@ class TestOptimizadorCortes(unittest.TestCase):
         valido_dec, msg_dec = validar_datos_entrada(df_ret, df_ped_dec, self.l_comercial, self.kerf)
         self.assertFalse(valido_dec)
         self.assertIn("decimales", msg_dec.lower())
+
+    def test_conflicto_desempate_menor_longitud_inicial(self):
+        # A_Grande (4500 mm) tras cortar P_Previa (2496 mm + 4 kerf) queda con saldo 2000 mm.
+        # Z_Chico (2000 mm) no puede alojar P_Previa (2496 mm), por lo que conserva su saldo inicial de 2000 mm.
+        # Para P_Objetivo (1500 mm), ambos dejan remanente 496 mm; debe elegirse Z_Chico por menor Longitud_Inicial (2000 < 4500).
+        df_ret = pd.DataFrame([
+            {"ID_Retal": "A_Grande", "Longitud_mm": 4500, "Cantidad": 1},
+            {"ID_Retal": "Z_Chico", "Longitud_mm": 2000, "Cantidad": 1}
+        ])
+        df_ped = pd.DataFrame([
+            {"ID_Pieza": "P_Previa", "Longitud_mm": 2496, "Cantidad": 1},
+            {"ID_Pieza": "P_Objetivo", "Longitud_mm": 1500, "Cantidad": 1}
+        ])
+        res = optimizar_cortes(df_ret, df_ped, self.l_comercial, self.kerf, self.umbral)
+        detalle_por_id = {fila["Origen_ID"]: fila for fila in res["detalle_csv"]}
+        self.assertIn("P_Objetivo(1500)", detalle_por_id["Retal_Z_Chico_1"]["Piezas_Asignadas"])
+
+    def test_pieza_imposible_6500_mm(self):
+        df_ped = pd.DataFrame([{"ID_Pieza": "P6500", "Longitud_mm": 6500, "Cantidad": 1}])
+        valido, msg = validar_datos_entrada(pd.DataFrame(), df_ped, self.l_comercial, self.kerf)
+        self.assertFalse(valido)
+        self.assertIn("P6500", msg)
+
+        res = optimizar_cortes(pd.DataFrame(), df_ped, self.l_comercial, self.kerf, self.umbral)
+        self.assertEqual(res["tubos_comprados"], 0)
+        self.assertEqual(len(res["pendientes"]), 1)
+        self.assertEqual(res["pendientes"][0]["L"], 6500)
+        self.assertTrue(res["balance"]["cuadra_perfecto"])
+
+    def test_cargar_csv_delimitador_coma_y_punto_y_coma(self):
+        csv_coma = "ID_Retal,Longitud_mm,Cantidad\nR1,3000,1\n"
+        df_inv, err_inv = cargar_csv_datos(io.StringIO(csv_coma), tipo="inventario")
+        self.assertEqual(err_inv, "")
+        self.assertEqual(int(df_inv.iloc[0]["Longitud_mm"]), 3000)
+        self.assertEqual(int(df_inv.iloc[0]["Cantidad"]), 1)
+
+        csv_punto_coma = (
+            "ID_Pieza;Longitud_mm;Cantidad\n"
+            "P2900;2900;1\n"
+            "P2000;2000;1\n"
+            "P1900;1900;1\n"
+            "P1800;1800;1\n"
+        )
+        df_ped, err_ped = cargar_csv_datos(io.StringIO(csv_punto_coma), tipo="pedidos")
+        self.assertEqual(err_ped, "")
+        self.assertEqual(len(df_ped), 4)
+
+        # El resultado de CSV debe cumplir exactamente el caso oficial
+        res = optimizar_cortes(df_inv, df_ped, self.l_comercial, self.kerf, self.umbral)
+        self.assertEqual(res["tubos_comprados"], 1)
+        self.assertEqual(res["balance"]["incorporado"], 8600)
+        self.assertEqual(res["balance"]["material_total_origen"], 9000)
+
+    def test_cargar_csv_decimales_coma_y_punto_a_enteros(self):
+        csv_decimales = (
+            "ID_Pieza;Longitud_mm;Cantidad\n"
+            "P1;2900,0;1,0\n"
+            "P2;1999.6;2.0\n"
+        )
+        df_ped, err = cargar_csv_datos(io.StringIO(csv_decimales), tipo="pedidos")
+        self.assertEqual(err, "")
+        self.assertEqual(list(df_ped["Longitud_mm"]), [2900, 2000])
+        self.assertEqual(list(df_ped["Cantidad"]), [1, 2])
+        self.assertTrue(pd.api.types.is_integer_dtype(df_ped["Longitud_mm"]))
+        self.assertTrue(pd.api.types.is_integer_dtype(df_ped["Cantidad"]))
+
+    def test_cargar_csv_errores_claros_espanol(self):
+        csv_col_faltante = "ID_Pieza,Longitud_mm\nP1,2000\n"
+        df_err1, msg1 = cargar_csv_datos(io.StringIO(csv_col_faltante), tipo="pedidos")
+        self.assertIsNone(df_err1)
+        self.assertIn("faltan las columnas", msg1.lower())
+
+        csv_cant_decimal = "ID_Pieza;Longitud_mm;Cantidad\nP1;2000;1,5\n"
+        df_err2, msg2 = cargar_csv_datos(io.StringIO(csv_cant_decimal), tipo="pedidos")
+        self.assertIsNone(df_err2)
+        self.assertIn("decimales", msg2.lower())
+
+    def test_validacion_celdas_vacias_e_id_vacio(self):
+        df_nan = pd.DataFrame([{"ID_Pieza": "P1", "Longitud_mm": None, "Cantidad": 1}])
+        valido_nan, msg_nan = validar_datos_entrada(pd.DataFrame(), df_nan, self.l_comercial, self.kerf)
+        self.assertFalse(valido_nan)
+        self.assertIn("vacías", msg_nan.lower())
+
+        df_id_vacio = pd.DataFrame([{"ID_Pieza": "   ", "Longitud_mm": 2000, "Cantidad": 1}])
+        valido_id, msg_id = validar_datos_entrada(pd.DataFrame(), df_id_vacio, self.l_comercial, self.kerf)
+        self.assertFalse(valido_id)
+        self.assertIn("vacío", msg_id.lower())
+
+    def test_generar_reporte_texto_con_pendientes_y_parentesis(self):
+        df_ped = pd.DataFrame([
+            {"ID_Pieza": "P_Valida(A)", "Longitud_mm": 2000, "Cantidad": 1},
+            {"ID_Pieza": "P_Imposible", "Longitud_mm": 6500, "Cantidad": 1}
+        ])
+        res = optimizar_cortes(pd.DataFrame(), df_ped, self.l_comercial, self.kerf, self.umbral)
+        reporte = generar_reporte_texto(res, res, self.l_comercial, self.kerf, self.umbral)
+        self.assertIn("Pieza P_Imposible: 6500 mm", reporte)
+        self.assertNotIn("Pieza None", reporte)
+
+        # Verificar que el parser de paréntesis en gráficos no lance ValueError con 'P_Valida(A)(2000)'
+        go_original = graficos_mod.go
+        if go_original is None:
+            graficos_mod.go = MagicMock()
+        try:
+            fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=self.kerf)
+            fig_sim = crear_simulacion_paso_a_paso(res["detalle_csv"][0], 2000, kerf_nominal=self.kerf)
+            self.assertIsNotNone(fig_3d)
+            self.assertIsNotNone(fig_sim)
+        finally:
+            graficos_mod.go = go_original
+
+    def test_archivos_datos_ejemplo(self):
+        with open("datos_ejemplo/inventario_valido.csv", "rb") as f:
+            df_inv, err_inv = cargar_csv_datos(f, tipo="inventario")
+        self.assertEqual(err_inv, "")
+
+        with open("datos_ejemplo/pedidos_validos.csv", "rb") as f:
+            df_ped, err_ped = cargar_csv_datos(f, tipo="pedidos")
+        self.assertEqual(err_ped, "")
+
+        res_coma = optimizar_cortes(df_inv, df_ped, self.l_comercial, self.kerf, self.umbral)
+        self.assertEqual(res_coma["tubos_comprados"], 1)
+        self.assertEqual(res_coma["balance"]["incorporado"], 8600)
+        self.assertEqual(res_coma["balance"]["material_total_origen"], 9000)
+
+        with open("datos_ejemplo/datos_punto_y_coma.csv", "rb") as f:
+            df_pyc, err_pyc = cargar_csv_datos(f, tipo="pedidos")
+        self.assertEqual(err_pyc, "")
+        res_pyc = optimizar_cortes(df_inv, df_pyc, self.l_comercial, self.kerf, self.umbral)
+        self.assertEqual(res_pyc["balance"], res_coma["balance"])
+
+        with open("datos_ejemplo/pedidos_con_errores.csv", "rb") as f:
+            df_err, err_msg = cargar_csv_datos(f, tipo="pedidos")
+        self.assertIsNone(df_err)
+        self.assertIn("decimales", err_msg.lower())
 
 
 if __name__ == "__main__":

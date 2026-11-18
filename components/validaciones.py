@@ -1,11 +1,96 @@
+import io
 import pandas as pd
 
 
+def cargar_csv_datos(archivo, tipo="inventario"):
+    col_id = "ID_Retal" if tipo == "inventario" else "ID_Pieza"
+    nombre_tabla = "Inventario" if tipo == "inventario" else "Pedidos"
+    columnas_esperadas = [col_id, "Longitud_mm", "Cantidad"]
+
+    try:
+        if hasattr(archivo, "getvalue"):
+            raw = archivo.getvalue()
+        elif hasattr(archivo, "read"):
+            raw = archivo.read()
+        else:
+            raw = archivo
+
+        if isinstance(raw, bytes):
+            texto = None
+            for enc in ("utf-8-sig", "utf-8", "latin-1"):
+                try:
+                    texto = raw.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if texto is None:
+                return None, f"Error en CSV de {nombre_tabla}: No se pudo decodificar el archivo."
+        else:
+            texto = str(raw)
+
+        lineas = [l.strip() for l in texto.splitlines() if l.strip()]
+        if not lineas:
+            return None, f"Error en CSV de {nombre_tabla}: El archivo está vacío."
+
+        cabecera = lineas[0]
+        delimitador = ";" if cabecera.count(";") > cabecera.count(",") else ","
+
+        df = pd.read_csv(io.StringIO("\n".join(lineas)), sep=delimitador, dtype=str)
+        df.columns = [c.strip() for c in df.columns]
+
+        faltantes = [c for c in columnas_esperadas if c not in df.columns]
+        if faltantes:
+            return None, (
+                f"Error en CSV de {nombre_tabla}: Faltan las columnas {faltantes}. "
+                f"Se requieren: {', '.join(columnas_esperadas)}."
+            )
+
+        df = df[columnas_esperadas].copy()
+        if df.empty:
+            return None, f"Error en CSV de {nombre_tabla}: El archivo no contiene filas de datos."
+
+        if df.isna().any().any():
+            return None, f"Error en CSV de {nombre_tabla}: Existen celdas vacías en el archivo."
+
+        df[col_id] = df[col_id].astype(str).str.strip()
+        if (df[col_id] == "").any():
+            return None, f"Error en CSV de {nombre_tabla}: El identificador ({col_id}) no puede estar vacío."
+
+        # Conversión de Longitud_mm (admite decimales con coma o punto y convierte a int mm)
+        longitudes_str = df["Longitud_mm"].astype(str).str.strip().str.replace(",", ".", regex=False)
+        longitudes_num = pd.to_numeric(longitudes_str, errors="coerce")
+        if longitudes_num.isna().any():
+            return None, f"Error en CSV de {nombre_tabla}: 'Longitud_mm' contiene valores no numéricos."
+        df["Longitud_mm"] = longitudes_num.round().astype(int)
+
+        # Conversión de Cantidad (admite formato '2', '2.0', '2,0', rechaza decimales fraccionarios)
+        cantidades_str = df["Cantidad"].astype(str).str.strip().str.replace(",", ".", regex=False)
+        cantidades_num = pd.to_numeric(cantidades_str, errors="coerce")
+        if cantidades_num.isna().any():
+            return None, f"Error en CSV de {nombre_tabla}: 'Cantidad' contiene valores no numéricos."
+        if (cantidades_num % 1 != 0).any():
+            return None, f"Error en CSV de {nombre_tabla}: Las cantidades no admiten decimales."
+        df["Cantidad"] = cantidades_num.astype(int)
+
+        return df, ""
+    except Exception as e:
+        return None, f"Error al procesar el archivo CSV de {nombre_tabla}: {str(e)}"
+
+
 def validar_datos_entrada(df_inventario, df_pedidos, l_comercial, kerf):
-    # 1. Validar decimales y negativos ANTES de filtrar
-    for nombre, df in [("Inventario", df_inventario), ("Pedidos", df_pedidos)]:
+    # 1. Validar celdas vacías, decimales y negativos ANTES de filtrar
+    for nombre, col_id, df in [
+        ("Inventario", "ID_Retal", df_inventario),
+        ("Pedidos", "ID_Pieza", df_pedidos)
+    ]:
         if df.empty:
             continue
+
+        if df[[col_id, "Longitud_mm", "Cantidad"]].isna().any().any():
+            return False, f"Error en {nombre}: Existen celdas vacías o sin completar."
+
+        if (df[col_id].astype(str).str.strip() == "").any():
+            return False, f"Error en {nombre}: El identificador ({col_id}) no puede estar vacío."
 
         if (df["Cantidad"] % 1 != 0).any():
             return False, f"Error en {nombre}: Las cantidades no admiten decimales."

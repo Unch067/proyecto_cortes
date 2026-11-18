@@ -1,5 +1,9 @@
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+try:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+except ModuleNotFoundError:
+    go = None
+    make_subplots = None
 
 
 def _crear_cubo_malla(x0, x1, y_centro, ancho_y, alto_z, color, hover_text, opacity=1.0):
@@ -59,8 +63,8 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
 
         for p_idx, p in enumerate(piezas_str):
             if "(" in p:
-                nombre = p.split("(")[0]
-                largo = int(p.split("(")[1].replace(")", ""))
+                nombre, largo_str = p.rsplit("(", 1)
+                largo = int(largo_str.replace(")", ""))
 
                 # 1. Prisma 3D: Pieza Útil
                 hover_pieza = (
@@ -343,8 +347,8 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
 
     for p_idx, p in enumerate(piezas_str):
         if "(" in p:
-            nombre = p.split("(")[0]
-            largo = int(p.split("(")[1].replace(")", ""))
+            nombre, largo_str = p.rsplit("(", 1)
+            largo = int(largo_str.replace(")", ""))
             fin_pieza = x_cursor + largo
 
             if fin_pieza <= cota_corte_actual:
@@ -476,7 +480,10 @@ def generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral):
         lineas.append("## 4. PIEZAS PENDIENTES SIN ATENDER")
         lineas.append("--------------------------------------------------")
         for p in res["pendientes"]:
-            lineas.append(f"- Pieza {p.get('ID_Pieza')}: {p.get('Longitud_mm')} mm (Cant: {p.get('Cantidad')})")
+            id_p = p.get("ID") if p.get("ID") is not None else p.get("ID_Pieza", "Sin_ID")
+            largo_p = p.get("L") if p.get("L") is not None else p.get("Longitud_mm", 0)
+            cant_str = f" (Cant: {p['Cantidad']})" if "Cantidad" in p else ""
+            lineas.append(f"- Pieza {id_p}: {largo_p} mm{cant_str}")
         lineas.append("")
 
     return "\n".join(lineas)

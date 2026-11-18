@@ -1,0 +1,13 @@
+# Entornos virtuales
+venv/
+.venv/
+
+# Artefactos de compilación PyInstaller
+dist/
+build/
+*.spec
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
