@@ -205,7 +205,7 @@ with tab_res:
         # Tabla comparativa
         df_comp = pd.DataFrame({
             "Métrica": ["Tubos Nuevos", "Descarte (mm)", "Pérdida (mm)", "Retal Generado (mm)"],
-            "Optimizado (IA)": [res["tubos_comprados"], bal["descarte"], bal["perdida"], bal["nuevo_retal"]],
+            "Optimizado": [res["tubos_comprados"], bal["descarte"], bal["perdida"], bal["nuevo_retal"]],
             "Orden Original": [res_orig["tubos_comprados"], res_orig["balance"]["descarte"], res_orig["balance"]["perdida"], res_orig["balance"]["nuevo_retal"]]
         })
         st.table(df_comp)

@@ -243,7 +243,7 @@ def crear_grafico_comparativo_dual(res, res_orig):
     # 1. Tubos Nuevos
     fig.add_trace(
         go.Bar(
-            name="Optimizado (IA)",
+            name="Optimizado",
             x=["Tubos"],
             y=[res["tubos_comprados"]],
             marker_color="#10B981",
@@ -269,7 +269,7 @@ def crear_grafico_comparativo_dual(res, res_orig):
     # 2. Descarte Inútil
     fig.add_trace(
         go.Bar(
-            name="Optimizado (IA)",
+            name="Optimizado",
             x=["Descarte"],
             y=[res["balance"]["descarte"]],
             marker_color="#10B981",

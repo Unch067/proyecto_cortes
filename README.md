@@ -61,7 +61,7 @@ La interfaz conserva tus datos y resultados en memoria mientras navegas entre su
    - Haz clic en **"🚀 Calcular Optimización"**.
 4. **📊 Resultados**:
    - **Balance de Materiales**: Indicadores de Material Origen, Tubos Nuevos a Comprar, Material Incorporado, Pérdida por Corte y Descarte Inútil.
-   - **Comparativa de Eficiencia**: Compara el algoritmo **Optimizado (IA)** contra el **Orden Original** de ingreso.
+   - **Comparativa de Eficiencia**: Compara el resultado **Optimizado** (Algoritmo Best-Fit) contra el **Orden Original** de ingreso.
    - **Exportar Resultados**: Descarga el plan de corte (`plan.csv`), el balance (`balance.csv`), el informe técnico para taller (`informe_tecnico_corte.txt`) y, si existieran, las piezas pendientes (`pendientes.csv`).
    - **📐 Gemelo Digital 3D**: Modelo volumétrico interactivo de las barras, piezas útiles (azul), cortes de disco (rojo), retales reutilizables (ámbar) y descartes (gris).
    - **⚙️ Simulador de Taller**: Selecciona cualquier barra y desplaza el control deslizante para simular el avance físico de la sierra milímetro a milímetro.
