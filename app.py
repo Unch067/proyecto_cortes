@@ -40,15 +40,19 @@ st.markdown("""
 # ==========================================
 # 1. INICIALIZACIÓN Y PERSISTENCIA DE ESTADO
 # ==========================================
+if "inventario_base" not in st.session_state:
+    st.session_state.inventario_base = pd.DataFrame([{"ID_Retal": "R1", "Longitud_mm": 3000, "Cantidad": 1}])
 if "inventario" not in st.session_state:
-    st.session_state.inventario = pd.DataFrame([{"ID_Retal": "R1", "Longitud_mm": 3000, "Cantidad": 1}])
-if "pedidos" not in st.session_state:
-    st.session_state.pedidos = pd.DataFrame([
+    st.session_state.inventario = st.session_state.inventario_base.copy()
+if "pedidos_base" not in st.session_state:
+    st.session_state.pedidos_base = pd.DataFrame([
         {"ID_Pieza": "P2900", "Longitud_mm": 2900, "Cantidad": 1},
         {"ID_Pieza": "P2000", "Longitud_mm": 2000, "Cantidad": 1},
         {"ID_Pieza": "P1900", "Longitud_mm": 1900, "Cantidad": 1},
         {"ID_Pieza": "P1800", "Longitud_mm": 1800, "Cantidad": 1}
     ])
+if "pedidos" not in st.session_state:
+    st.session_state.pedidos = st.session_state.pedidos_base.copy()
 if "resultados" not in st.session_state:
     st.session_state.resultados = None
 if "res_original" not in st.session_state:
@@ -91,15 +95,16 @@ with tab_inv:
             if err_inv:
                 st.error(err_inv)
             else:
-                st.session_state.inventario = df_csv_inv
+                st.session_state.inventario_base = df_csv_inv
+                st.session_state.inventario = df_csv_inv.copy()
                 st.session_state.csv_inv_firma = firma_inv
                 st.session_state.ver_editor_inv += 1
                 st.success("Inventario cargado correctamente desde CSV.")
     else:
         st.session_state.csv_inv_firma = None
 
-    st.session_state.inventario = st.data_editor(
-        st.session_state.inventario,
+    df_inv_editado = st.data_editor(
+        st.session_state.inventario_base,
         num_rows="dynamic",
         key=f"editor_inv_{st.session_state.ver_editor_inv}",
         column_config={
@@ -108,6 +113,7 @@ with tab_inv:
             "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0, step=1, required=True)
         }
     )
+    st.session_state.inventario = df_inv_editado
 
 with tab_ped:
     st.subheader("Piezas Requeridas")
@@ -123,15 +129,16 @@ with tab_ped:
             if err_ped:
                 st.error(err_ped)
             else:
-                st.session_state.pedidos = df_csv_ped
+                st.session_state.pedidos_base = df_csv_ped
+                st.session_state.pedidos = df_csv_ped.copy()
                 st.session_state.csv_ped_firma = firma_ped
                 st.session_state.ver_editor_ped += 1
                 st.success("Pedidos cargados correctamente desde CSV.")
     else:
         st.session_state.csv_ped_firma = None
 
-    st.session_state.pedidos = st.data_editor(
-        st.session_state.pedidos,
+    df_ped_editado = st.data_editor(
+        st.session_state.pedidos_base,
         num_rows="dynamic",
         key=f"editor_ped_{st.session_state.ver_editor_ped}",
         column_config={
@@ -140,6 +147,7 @@ with tab_ped:
             "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0, step=1, required=True)
         }
     )
+    st.session_state.pedidos = df_ped_editado
 
     if st.button("🚀 Calcular Optimización", type="primary", use_container_width=True):
         es_valido, msg = validar_datos_entrada(st.session_state.inventario, st.session_state.pedidos, l_comercial, kerf)
