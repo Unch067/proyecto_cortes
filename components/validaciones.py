@@ -83,6 +83,26 @@ def cargar_csv_datos(archivo, tipo="inventario"):
         return None, f"Error al procesar el archivo CSV de {nombre_tabla}: {str(e)}"
 
 
+def normalizar_ids_inventario(df_editado, n_filas_base=None):
+    """
+    Asegura que la columna ID_Retal tenga la secuencia exacta ['R1', 'R2', ..., 'Rn']
+    sin descartar filas con Longitud_mm o Cantidad en None/NaN.
+    Retorna (df_normalizado, requiere_rerun).
+    """
+    df_norm = df_editado.reset_index(drop=True).copy()
+    ids_esperados = [f"R{i + 1}" for i in range(len(df_norm))]
+
+    tiene_nulos_id = bool(df_norm["ID_Retal"].isna().any()) if not df_norm.empty else False
+    ids_actuales = df_norm["ID_Retal"].tolist() if not df_norm.empty else []
+    cambio_cantidad_filas = (n_filas_base is not None and len(df_norm) != n_filas_base)
+
+    if cambio_cantidad_filas or tiene_nulos_id or ids_actuales != ids_esperados:
+        df_norm["ID_Retal"] = ids_esperados
+        return df_norm, True
+
+    return df_norm, False
+
+
 def _validar_tabla_base(df, nombre, col_id):
     if df.empty:
         return True, ""

@@ -3,7 +3,11 @@ import unittest
 from unittest.mock import MagicMock
 import pandas as pd
 from core.optimizador import optimizar_cortes
-from components.validaciones import validar_datos_entrada, cargar_csv_datos
+from components.validaciones import (
+    validar_datos_entrada,
+    cargar_csv_datos,
+    normalizar_ids_inventario
+)
 import components.graficos as graficos_mod
 from components.graficos import (
     crear_gemelo_digital_3d,
@@ -343,6 +347,30 @@ class TestOptimizadorCortes(unittest.TestCase):
         fig_sim = crear_simulacion_paso_a_paso(fila_tubo, fila_tubo["Longitud_Inicial"], kerf_nominal=self.kerf)
         traza_sobrante = next(t for t in fig_sim.data if t.name == "Sobrante")
         self.assertEqual(traza_sobrante.text, "288 mm")
+
+    def test_normalizar_ids_inventario_sin_bucle_rerun(self):
+        # 1. Al agregar una fila vacía (None/NaN en ID, Longitud y Cantidad), asigna R2 y pide rerun
+        df_con_nueva = pd.DataFrame([
+            {"ID_Retal": "R1", "Longitud_mm": 3000, "Cantidad": 1},
+            {"ID_Retal": None, "Longitud_mm": None, "Cantidad": None}
+        ])
+        df_norm, requiere_rerun = normalizar_ids_inventario(df_con_nueva, n_filas_base=1)
+        self.assertTrue(requiere_rerun)
+        self.assertEqual(list(df_norm["ID_Retal"]), ["R1", "R2"])
+        self.assertTrue(pd.isna(df_norm.loc[1, "Longitud_mm"]))
+        self.assertTrue(pd.isna(df_norm.loc[1, "Cantidad"]))
+
+        # 2. En el siguiente rerun (ya con R1..R2 y mismo n_filas_base), NO pide rerun (sin bucle infinito)
+        df_norm_2, requiere_rerun_2 = normalizar_ids_inventario(df_norm, n_filas_base=2)
+        self.assertFalse(requiere_rerun_2)
+        self.assertEqual(list(df_norm_2["ID_Retal"]), ["R1", "R2"])
+
+        # 3. Al eliminar la primera fila quedando ['R2'], renumera a ['R1'] y pide rerun una sola vez
+        df_tras_borrar = pd.DataFrame([{"ID_Retal": "R2", "Longitud_mm": 1500, "Cantidad": 2}])
+        df_norm_3, requiere_rerun_3 = normalizar_ids_inventario(df_tras_borrar, n_filas_base=2)
+        self.assertTrue(requiere_rerun_3)
+        self.assertEqual(list(df_norm_3["ID_Retal"]), ["R1"])
+        self.assertEqual(int(df_norm_3.loc[0, "Longitud_mm"]), 1500)
 
 
 if __name__ == "__main__":

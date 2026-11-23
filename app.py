@@ -4,7 +4,8 @@ from core.optimizador import optimizar_cortes
 from components.validaciones import (
     validar_inventario,
     validar_pedidos,
-    cargar_csv_datos
+    cargar_csv_datos,
+    normalizar_ids_inventario
 )
 from components.graficos import (
     crear_gemelo_digital_3d,
@@ -239,17 +240,17 @@ with tab_inv:
         key=f"editor_inv_{st.session_state.ver_editor_inv}",
         column_config={
             "ID_Retal": st.column_config.TextColumn("ID Retal (Auto)", disabled=True),
-            "Longitud_mm": st.column_config.NumberColumn("Longitud (mm)", min_value=1, step=1, required=True),
-            "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0, step=1, required=True)
+            "Longitud_mm": st.column_config.NumberColumn("Longitud (mm)", min_value=1, step=1),
+            "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0, step=1)
         }
     )
 
-    # Reasignar automáticamente R1, R2, ..., Rn si se agregaron o eliminaron filas
-    df_inv_norm = df_inv_editado.reset_index(drop=True).copy()
-    ids_esperados = [f"R{i + 1}" for i in range(len(df_inv_norm))]
-    ids_actuales = df_inv_norm["ID_Retal"].astype(str).tolist() if not df_inv_norm.empty else []
-    if ids_actuales != ids_esperados:
-        df_inv_norm["ID_Retal"] = ids_esperados
+    # Reasignar automáticamente R1, R2, ..., Rn en cuanto se agregue o elimine una fila (sin descartar None/NaN)
+    df_inv_norm, requiere_rerun_inv = normalizar_ids_inventario(
+        df_inv_editado,
+        n_filas_base=len(st.session_state.inventario_base)
+    )
+    if requiere_rerun_inv:
         st.session_state.inventario_base = df_inv_norm
         st.session_state.inventario = df_inv_norm.copy()
         st.session_state.ver_editor_inv += 1
