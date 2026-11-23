@@ -320,18 +320,27 @@ class TestOptimizadorCortes(unittest.TestCase):
         ])
         res = optimizar_cortes(df_ret, df_ped, self.l_comercial, self.kerf, self.umbral)
 
-        # 1. Reporte incluye diámetro y pulgadas
+        # 1. Reporte incluye diámetro y pulgadas (y soporte de etiqueta NPS)
         reporte = generar_reporte_texto(res, res, self.l_comercial, self.kerf, self.umbral, diametro_mm=200)
         self.assertIn("200 mm", reporte)
         self.assertIn("7.87 in", reporte)
 
+        reporte_nps = generar_reporte_texto(
+            res, res, self.l_comercial, self.kerf, self.umbral,
+            diametro_mm=114.3, diametro_etiqueta='4" (Ø ext. 114.3 mm)'
+        )
+        self.assertIn('4" (Ø ext. 114.3 mm)', reporte_nps)
+
         # 2. Gemelo 3D construye cilindros huecos (96 vértices y 192 triángulos con 24 segmentos)
-        fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=self.kerf, diametro_mm=200)
+        fig_3d = crear_gemelo_digital_3d(
+            res["detalle_csv"], kerf_nominal=self.kerf,
+            diametro_mm=114.3, diametro_etiqueta='4" (Ø ext. 114.3 mm)'
+        )
         self.assertGreater(len(fig_3d.data), 0)
         primera_malla = fig_3d.data[0]
         self.assertEqual(len(primera_malla.x), 96)
         self.assertEqual(len(primera_malla.i), 192)
-        self.assertAlmostEqual(max(primera_malla.z), 100.0, places=1)
+        self.assertAlmostEqual(max(primera_malla.z), 57.15, places=1)
 
         # 3. Dona oculta porcentajes menores al 2% (Pérdida=16/9000=0.18%, Descarte=96/9000=1.07%)
         fig_dona = crear_grafico_balance_dona(res["balance"])

@@ -64,14 +64,15 @@ def _crear_cilindro_hueco_malla(
     )
 
 
-def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=100):
+def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=114.3, diametro_etiqueta=None):
     """
     Genera el entorno 3D interactivo con tubos cilíndricos huecos escalados
-    según el diámetro configurado y relación de aspecto calibrada.
+    según el diámetro exterior real (norma ANSI/ASME B36.10M) y relación de aspecto calibrada.
     """
     fig = go.Figure()
 
     diam = max(15.0, float(diametro_mm))
+    texto_diam = diametro_etiqueta if diametro_etiqueta else f"{diam:.1f} mm"
     radio_ext = diam / 2.0
     radio_int = radio_ext * 0.72  # Espesor de pared visible (28% del radio)
     radio_ext_kerf = radio_ext * 1.18
@@ -100,7 +101,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=100):
                     f"<b>Bancada:</b> {origen_id}<br>"
                     f"<b>Pieza:</b> {nombre}<br>"
                     f"<b>Longitud:</b> {largo} mm<br>"
-                    f"<b>Diámetro:</b> {int(diam)} mm<br>"
+                    f"<b>Diámetro:</b> {texto_diam}<br>"
                     f"<b>Tramo:</b> [{x_actual} - {x_actual + largo} mm]"
                 )
                 fig.add_trace(_crear_cilindro_hueco_malla(
@@ -139,7 +140,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=100):
                 f"<b>Bancada:</b> {origen_id}<br>"
                 f"<b>Estado:</b> {clasif}<br>"
                 f"<b>Longitud:</b> {sobrante_mm} mm<br>"
-                f"<b>Diámetro:</b> {int(diam)} mm"
+                f"<b>Diámetro:</b> {texto_diam}"
             )
             fig.add_trace(_crear_cilindro_hueco_malla(
                 x0=x_actual,
@@ -478,7 +479,7 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
     )
     return fig
 
-def generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral, diametro_mm=100):
+def generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral, diametro_mm=114.3, diametro_etiqueta=None):
     """
     Genera un informe técnico formal en formato texto estructurado (Markdown)
     para bitácora de obra y auditoría de materiales.
@@ -488,7 +489,10 @@ def generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral, diametro_mm=
     lineas.append("# INFORME TÉCNICO DE CORTE Y BALANCE DE MATERIAL")
     lineas.append("==================================================")
     lineas.append(f"- Longitud Comercial Estándar: {l_comercial} mm")
-    lineas.append(f"- Diámetro del Tubo:           {diametro_mm} mm ({diametro_mm / 25.4:.2f} in)")
+    if diametro_etiqueta:
+        lineas.append(f"- Diámetro Comercial (NPS):    {diametro_etiqueta}")
+    else:
+        lineas.append(f"- Diámetro del Tubo:           {diametro_mm} mm ({diametro_mm / 25.4:.2f} in)")
     lineas.append(f"- Espesor de Disco (Kerf):      {kerf} mm")
     lineas.append(f"- Umbral Mínimo de Retal:       {umbral} mm")
     lineas.append("")

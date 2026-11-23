@@ -21,7 +21,29 @@ from components.graficos import (
 DEFAULT_L_COMERCIAL = 6000
 DEFAULT_KERF = 4
 DEFAULT_UMBRAL = 200
-DEFAULT_DIAMETRO = 100
+
+# Tabla estándar de tubería comercial ANSI/ASME B36.10M (NPS -> Diámetro exterior real en mm)
+DIAMETROS_COMERCIALES_NPS = {
+    '1/2" (Ø ext. 21.3 mm)': 21.3,
+    '3/4" (Ø ext. 26.7 mm)': 26.7,
+    '1" (Ø ext. 33.4 mm)': 33.4,
+    '1 1/4" (Ø ext. 42.2 mm)': 42.2,
+    '1 1/2" (Ø ext. 48.3 mm)': 48.3,
+    '2" (Ø ext. 60.3 mm)': 60.3,
+    '2 1/2" (Ø ext. 73.0 mm)': 73.0,
+    '3" (Ø ext. 88.9 mm)': 88.9,
+    '4" (Ø ext. 114.3 mm)': 114.3,
+    '6" (Ø ext. 168.3 mm)': 168.3,
+    '8" (Ø ext. 219.1 mm)': 219.1,
+    '10" (Ø ext. 273.1 mm)': 273.1,
+    '12" (Ø ext. 323.9 mm)': 323.9,
+    '14" (Ø ext. 355.6 mm)': 355.6,
+    '16" (Ø ext. 406.4 mm)': 406.4,
+    '18" (Ø ext. 457.2 mm)': 457.2,
+    '20" (Ø ext. 508.0 mm)': 508.0,
+    '24" (Ø ext. 609.6 mm)': 609.6,
+}
+DEFAULT_DIAMETRO_ETIQUETA = '4" (Ø ext. 114.3 mm)'
 
 st.set_page_config(page_title="OptiCorte 1D - Plan de Corte", layout="wide")
 
@@ -116,7 +138,7 @@ st.caption("Herramienta de control de descarte, balance de masa y layout de tall
 with st.expander("📘 Guía Rápida de Uso (4 pasos sencillos)", expanded=True):
     st.markdown("""
     Bienvenido a **OptiCorte 1D**. Sigue estos **4 pasos en orden** para calcular tu plan de corte sin errores:
-    1. **⚙️ Configuración:** Elige el largo del tubo nuevo que compras (`6000 mm` o `9000 mm`), el grosor de tu disco de corte (*kerf*) y el diámetro del tubo. Luego pulsa **Confirmar Configuración**.
+    1. **⚙️ Configuración:** Elige el largo del tubo nuevo comercial (`6000 mm` o `9000 mm`) y selecciona el **diámetro comercial (NPS)** del tubo según la norma ANSI/ASME B36.10M. La pérdida por corte (`4 mm`) y el retal mínimo (`200 mm`) son parámetros fijos estándar. Luego pulsa **Confirmar Configuración**.
     2. **📦 Inventario:** Anota los sobrantes (**retales**) que ya tienes en almacén (o súbelos desde un archivo CSV) y pulsa **Validar y Confirmar Inventario**.
     3. **📋 Pedidos:** Escribe las piezas que necesitas cortar hoy (o cárgalas desde CSV) y pulsa **Validar y Calcular Optimización**.
     4. **📊 Resultados:** Consulta cuántos tubos nuevos debes comprar, descarga la hoja de ruta para la sierra y revisa el modelo 3D y el simulador de corte.
@@ -163,17 +185,18 @@ with tab_conf:
         min_value=0,
         value=DEFAULT_KERF,
         step=1,
+        disabled=True,
         key="cfg_kerf"
     ))
-    diametro_mm = int(col3.number_input(
-        "Diámetro del Tubo (mm)",
-        min_value=15,
-        max_value=1000,
-        value=DEFAULT_DIAMETRO,
-        step=1,
+    opciones_diametro = list(DIAMETROS_COMERCIALES_NPS.keys())
+    diametro_etiqueta = col3.selectbox(
+        "Diámetro del Tubo (NPS)",
+        options=opciones_diametro,
+        index=opciones_diametro.index(DEFAULT_DIAMETRO_ETIQUETA),
         key="cfg_diametro"
-    ))
-    col3.caption(f"Equivalencia: **{diametro_mm / 25.4:.2f} pulgadas (in)**")
+    )
+    diametro_mm = float(DIAMETROS_COMERCIALES_NPS[diametro_etiqueta])
+    col3.caption(f"Norma ANSI/ASME B36.10M · Ø ext.: **{diametro_mm:.1f} mm**")
     umbral = int(col4.number_input(
         "Retal Mínimo (mm)",
         min_value=0,
@@ -183,7 +206,7 @@ with tab_conf:
         key="cfg_umbral"
     ))
 
-    conf_actual = (l_comercial, kerf, umbral, diametro_mm)
+    conf_actual = (l_comercial, kerf, umbral, diametro_etiqueta)
     if st.session_state.paso_conf_ok and st.session_state.conf_confirmada != conf_actual:
         st.session_state.paso_conf_ok = False
         st.session_state.paso_inv_ok = False
@@ -420,7 +443,11 @@ with tab_res:
     c1.download_button("Descargar Plan (CSV)", df_plan.to_csv(index=False).encode('utf-8'), "plan.csv", "text/csv")
     c2.download_button("Descargar Balance (CSV)", pd.DataFrame([bal]).to_csv(index=False).encode('utf-8'), "balance.csv", "text/csv")
 
-    texto_reporte = generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral, diametro_mm=diametro_mm)
+    texto_reporte = generar_reporte_texto(
+        res, res_orig, l_comercial, kerf, umbral,
+        diametro_mm=diametro_mm,
+        diametro_etiqueta=diametro_etiqueta
+    )
     c3.download_button("Descargar Informe Técnico", texto_reporte.encode('utf-8'), "informe_tecnico_corte.txt", "text/plain")
 
     if res["pendientes"]:
@@ -434,9 +461,14 @@ with tab_res:
     if res["detalle_csv"]:
         st.markdown("---")
         st.subheader("📐 Gemelo Digital 3D: Layout de Taller")
-        st.write(f"Simulación volumétrica de tubos cilíndricos huecos (**Ø {diametro_mm} mm**). **Gira, rota o amplía** el modelo con el cursor:")
+        st.write(f"Simulación volumétrica de tubos cilíndricos huecos — **NPS {diametro_etiqueta}**. **Gira, rota o amplía** el modelo con el cursor:")
 
-        fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=kerf, diametro_mm=diametro_mm)
+        fig_3d = crear_gemelo_digital_3d(
+            res["detalle_csv"],
+            kerf_nominal=kerf,
+            diametro_mm=diametro_mm,
+            diametro_etiqueta=diametro_etiqueta
+        )
         st.plotly_chart(fig_3d, use_container_width=True)
 
         # ==========================================
