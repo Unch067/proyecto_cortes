@@ -216,6 +216,7 @@ def optimizar_multi_diametro(
     df_ped_act = df_ped[df_ped["Cantidad"] > 0].copy() if not df_ped.empty else df_ped
     df_ret_act = df_ret[df_ret["Cantidad"] > 0].copy() if not df_ret.empty else df_ret
 
+    # 1. Obtiene la lista única de diámetros solicitados en los pedidos (conservando su orden de aparición)
     diametros_pedidos = list(dict.fromkeys(df_ped_act["Diametro"].tolist())) if not df_ped_act.empty else []
 
     balance_global = {
@@ -230,10 +231,13 @@ def optimizar_multi_diametro(
     detalle_global = []
     pendientes_globales = []
 
+    # 2. Procesa cada diámetro por separado para nunca mezclar tuberías de distinta medida física
     for diam in diametros_pedidos:
+        # Filtra exclusivamente las piezas requeridas (sub_ped) y los retales (sub_ret) de este diámetro
         sub_ped = df_ped_act[df_ped_act["Diametro"] == diam]
         sub_ret = df_ret_act[df_ret_act["Diametro"] == diam] if not df_ret_act.empty else pd.DataFrame()
 
+        # Ejecuta el algoritmo Best-Fit Decreasing solo para el grupo del diámetro actual
         res_d = optimizar_cortes(
             sub_ret, sub_ped, l_comercial, kerf, umbral, usar_orden_original=usar_orden_original
         )
@@ -241,12 +245,14 @@ def optimizar_multi_diametro(
         diam_mm = float(diametros_map.get(diam, 114.3))
         diam_corto = diam.split(" (")[0]
 
+        # 3. Consolida los tubos nuevos comprados por diámetro y acumula el balance de masa global
         tubos_por_diametro[diam] = res_d["tubos_comprados"]
         tubos_totales += res_d["tubos_comprados"]
 
         for clave in balance_global:
             balance_global[clave] += res_d["balance"][clave]
 
+        # Etiqueta cada barra del plan con su diámetro nominal y su diámetro exterior en mm para el modelo 3D
         for fila in res_d["detalle_csv"]:
             fila_con_diam = {
                 "Origen_ID": f"{fila['Origen_ID']} [{diam_corto}]",
@@ -266,6 +272,7 @@ def optimizar_multi_diametro(
             p_copy["Diametro"] = diam
             pendientes_globales.append(p_copy)
 
+    # Verifica que la ecuación de conservación de masa global cuadre al 100%
     total_calc = (
         balance_global["incorporado"]
         + balance_global["perdida"]
@@ -274,7 +281,7 @@ def optimizar_multi_diametro(
     )
     balance_global["cuadra_perfecto"] = (balance_global["material_total_origen"] == total_calc)
 
-    # Retales en almacén cuyos diámetros no fueron solicitados en los pedidos de esta orden
+    # 4. Identifica los retales de otros diámetros que no fueron pedidos y quedan intactos en almacén
     if not df_ret_act.empty:
         df_reservados = df_ret_act[~df_ret_act["Diametro"].isin(diametros_pedidos)].copy()
         retales_reservados = df_reservados[["ID_Retal", "Diametro", "Longitud_mm", "Cantidad"]].to_dict("records")
