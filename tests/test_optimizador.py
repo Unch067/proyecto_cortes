@@ -4,9 +4,12 @@ from unittest.mock import MagicMock
 import pandas as pd
 from core.optimizador import optimizar_cortes
 from components.validaciones import (
+    DEFAULT_DIAMETRO_ETIQUETA,
     validar_datos_entrada,
+    validar_inventario,
     cargar_csv_datos,
-    normalizar_ids_inventario
+    normalizar_ids_inventario,
+    filtrar_inventario_por_diametro
 )
 import components.graficos as graficos_mod
 from components.graficos import (
@@ -358,28 +361,83 @@ class TestOptimizadorCortes(unittest.TestCase):
         self.assertEqual(traza_sobrante.text, "288 mm")
 
     def test_normalizar_ids_inventario_sin_bucle_rerun(self):
-        # 1. Al agregar una fila vacía (None/NaN en ID, Longitud y Cantidad), asigna R2 y pide rerun
+        diam_activo = '6" (Ø ext. 168.3 mm)'
+        # 1. Al agregar una fila vacía (None/NaN en ID, Diametro, Longitud y Cantidad), asigna R2 + diámetro activo y pide rerun
         df_con_nueva = pd.DataFrame([
-            {"ID_Retal": "R1", "Longitud_mm": 3000, "Cantidad": 1},
-            {"ID_Retal": None, "Longitud_mm": None, "Cantidad": None}
+            {"ID_Retal": "R1", "Diametro": DEFAULT_DIAMETRO_ETIQUETA, "Longitud_mm": 3000, "Cantidad": 1},
+            {"ID_Retal": None, "Diametro": None, "Longitud_mm": None, "Cantidad": None}
         ])
-        df_norm, requiere_rerun = normalizar_ids_inventario(df_con_nueva, n_filas_base=1)
+        df_norm, requiere_rerun = normalizar_ids_inventario(
+            df_con_nueva, n_filas_base=1, diametro_por_defecto=diam_activo
+        )
         self.assertTrue(requiere_rerun)
         self.assertEqual(list(df_norm["ID_Retal"]), ["R1", "R2"])
+        self.assertEqual(list(df_norm["Diametro"]), [DEFAULT_DIAMETRO_ETIQUETA, diam_activo])
         self.assertTrue(pd.isna(df_norm.loc[1, "Longitud_mm"]))
         self.assertTrue(pd.isna(df_norm.loc[1, "Cantidad"]))
 
-        # 2. En el siguiente rerun (ya con R1..R2 y mismo n_filas_base), NO pide rerun (sin bucle infinito)
-        df_norm_2, requiere_rerun_2 = normalizar_ids_inventario(df_norm, n_filas_base=2)
+        # 2. En el siguiente rerun (ya con R1..R2, diámetros asignados y mismo n_filas_base), NO pide rerun (sin bucle infinito)
+        df_norm_2, requiere_rerun_2 = normalizar_ids_inventario(
+            df_norm, n_filas_base=2, diametro_por_defecto=diam_activo
+        )
         self.assertFalse(requiere_rerun_2)
         self.assertEqual(list(df_norm_2["ID_Retal"]), ["R1", "R2"])
 
         # 3. Al eliminar la primera fila quedando ['R2'], renumera a ['R1'] y pide rerun una sola vez
-        df_tras_borrar = pd.DataFrame([{"ID_Retal": "R2", "Longitud_mm": 1500, "Cantidad": 2}])
-        df_norm_3, requiere_rerun_3 = normalizar_ids_inventario(df_tras_borrar, n_filas_base=2)
+        df_tras_borrar = pd.DataFrame([
+            {"ID_Retal": "R2", "Diametro": diam_activo, "Longitud_mm": 1500, "Cantidad": 2}
+        ])
+        df_norm_3, requiere_rerun_3 = normalizar_ids_inventario(
+            df_tras_borrar, n_filas_base=2, diametro_por_defecto=diam_activo
+        )
         self.assertTrue(requiere_rerun_3)
         self.assertEqual(list(df_norm_3["ID_Retal"]), ["R1"])
         self.assertEqual(int(df_norm_3.loc[0, "Longitud_mm"]), 1500)
+
+    def test_inventario_por_diametro_validacion_csv_y_filtrado_fisico(self):
+        diam_4 = '4" (Ø ext. 114.3 mm)'
+        diam_2 = '2" (Ø ext. 60.3 mm)'
+
+        # 1. CSV sin columna Diametro recibe el diámetro seleccionado en Configuración
+        csv_sin_diam = "Longitud_mm,Cantidad\n3000,1\n"
+        df_inv_def, err_def = cargar_csv_datos(
+            io.StringIO(csv_sin_diam), tipo="inventario", diametro_por_defecto=diam_2
+        )
+        self.assertEqual(err_def, "")
+        self.assertEqual(list(df_inv_def["Diametro"]), [diam_2])
+
+        # 2. CSV con diámetro fuera de la tabla NPS es rechazado
+        csv_diam_malo = 'Diametro;Longitud_mm;Cantidad\n99" (Inventado);3000;1\n'
+        df_inv_err, err_malo = cargar_csv_datos(io.StringIO(csv_diam_malo), tipo="inventario")
+        self.assertIsNone(df_inv_err)
+        self.assertIn("nps", err_malo.lower())
+
+        # 3. validar_inventario rechaza diámetro vacío o fuera de lista estándar
+        df_diam_vacio = pd.DataFrame([{"ID_Retal": "R1", "Diametro": "", "Longitud_mm": 3000, "Cantidad": 1}])
+        val_vacio, _ = validar_inventario(df_diam_vacio, self.l_comercial)
+        self.assertFalse(val_vacio)
+
+        df_diam_invalido = pd.DataFrame([{"ID_Retal": "R1", "Diametro": "5 pulgadas", "Longitud_mm": 3000, "Cantidad": 1}])
+        val_inv, _ = validar_inventario(df_diam_invalido, self.l_comercial)
+        self.assertFalse(val_inv)
+
+        # 4. Filtrado físico: retal de 2" NO se consume ni entra al balance de una orden de 4"
+        df_inv_mixto = pd.DataFrame([
+            {"ID_Retal": "R1", "Diametro": diam_2, "Longitud_mm": 3000, "Cantidad": 2},
+            {"ID_Retal": "R2", "Diametro": diam_4, "Longitud_mm": 1000, "Cantidad": 1}
+        ])
+        df_comp, n_comp, n_otros = filtrar_inventario_por_diametro(df_inv_mixto, diam_4)
+        self.assertEqual(n_comp, 1)
+        self.assertEqual(n_otros, 2)
+        self.assertEqual(list(df_comp["ID_Retal"]), ["R2"])
+
+        df_ped_4 = pd.DataFrame([{"ID_Pieza": "P2900", "Longitud_mm": 2900, "Cantidad": 1}])
+        res = optimizar_cortes(df_comp, df_ped_4, self.l_comercial, self.kerf, self.umbral)
+        # No pudo usar los retales de 2" (3000 mm) ni el de 4" (1000 mm): compra 1 tubo nuevo de 6000 mm
+        self.assertEqual(res["tubos_comprados"], 1)
+        self.assertEqual(res["balance"]["material_total_origen"], 6000)
+        self.assertEqual(res["balance"]["incorporado"], 2900)
+        self.assertTrue(res["balance"]["cuadra_perfecto"])
 
 
 if __name__ == "__main__":

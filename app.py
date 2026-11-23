@@ -2,10 +2,13 @@ import streamlit as st
 import pandas as pd
 from core.optimizador import optimizar_cortes
 from components.validaciones import (
+    DIAMETROS_COMERCIALES_NPS,
+    DEFAULT_DIAMETRO_ETIQUETA,
     validar_inventario,
     validar_pedidos,
     cargar_csv_datos,
-    normalizar_ids_inventario
+    normalizar_ids_inventario,
+    filtrar_inventario_por_diametro
 )
 from components.graficos import (
     crear_gemelo_digital_3d,
@@ -21,29 +24,6 @@ from components.graficos import (
 DEFAULT_L_COMERCIAL = 6000
 DEFAULT_KERF = 4
 DEFAULT_UMBRAL = 200
-
-# Tabla estándar de tubería comercial ANSI/ASME B36.10M (NPS -> Diámetro exterior real en mm)
-DIAMETROS_COMERCIALES_NPS = {
-    '1/2" (Ø ext. 21.3 mm)': 21.3,
-    '3/4" (Ø ext. 26.7 mm)': 26.7,
-    '1" (Ø ext. 33.4 mm)': 33.4,
-    '1 1/4" (Ø ext. 42.2 mm)': 42.2,
-    '1 1/2" (Ø ext. 48.3 mm)': 48.3,
-    '2" (Ø ext. 60.3 mm)': 60.3,
-    '2 1/2" (Ø ext. 73.0 mm)': 73.0,
-    '3" (Ø ext. 88.9 mm)': 88.9,
-    '4" (Ø ext. 114.3 mm)': 114.3,
-    '6" (Ø ext. 168.3 mm)': 168.3,
-    '8" (Ø ext. 219.1 mm)': 219.1,
-    '10" (Ø ext. 273.1 mm)': 273.1,
-    '12" (Ø ext. 323.9 mm)': 323.9,
-    '14" (Ø ext. 355.6 mm)': 355.6,
-    '16" (Ø ext. 406.4 mm)': 406.4,
-    '18" (Ø ext. 457.2 mm)': 457.2,
-    '20" (Ø ext. 508.0 mm)': 508.0,
-    '24" (Ø ext. 609.6 mm)': 609.6,
-}
-DEFAULT_DIAMETRO_ETIQUETA = '4" (Ø ext. 114.3 mm)'
 
 st.set_page_config(page_title="OptiCorte 1D - Plan de Corte", layout="wide")
 
@@ -90,9 +70,16 @@ st.markdown("""
 # 1. INICIALIZACIÓN Y PERSISTENCIA DE ESTADO
 # ==========================================
 if "inventario_base" not in st.session_state:
-    st.session_state.inventario_base = pd.DataFrame([{"ID_Retal": "R1", "Longitud_mm": 3000, "Cantidad": 1}])
+    st.session_state.inventario_base = pd.DataFrame([{
+        "ID_Retal": "R1",
+        "Diametro": DEFAULT_DIAMETRO_ETIQUETA,
+        "Longitud_mm": 3000,
+        "Cantidad": 1
+    }])
 if "inventario" not in st.session_state:
     st.session_state.inventario = st.session_state.inventario_base.copy()
+if "info_diametro_inv" not in st.session_state:
+    st.session_state.info_diametro_inv = None
 if "pedidos_base" not in st.session_state:
     st.session_state.pedidos_base = pd.DataFrame([
         {"ID_Pieza": "P2900", "Longitud_mm": 2900, "Cantidad": 1},
@@ -234,14 +221,18 @@ with tab_inv:
 
     st.subheader("Paso 2: Retales Disponibles en Obra")
     archivo_inv = st.file_uploader(
-        "📂 Cargar retales desde CSV (columnas requeridas: Longitud_mm, Cantidad · ID_Retal se genera automáticamente · delimitador ',' o ';')",
+        "📂 Cargar retales desde CSV (requiere Longitud_mm, Cantidad; Diametro opcional · ID_Retal se genera automáticamente · delimitador ',' o ';')",
         type=["csv"],
         key="uploader_inv"
     )
     if archivo_inv is not None:
         firma_inv = (archivo_inv.name, archivo_inv.size)
         if firma_inv != st.session_state.csv_inv_firma:
-            df_csv_inv, err_inv = cargar_csv_datos(archivo_inv, tipo="inventario")
+            df_csv_inv, err_inv = cargar_csv_datos(
+                archivo_inv,
+                tipo="inventario",
+                diametro_por_defecto=diametro_etiqueta
+            )
             if err_inv:
                 st.error(err_inv)
             else:
@@ -261,17 +252,25 @@ with tab_inv:
         num_rows="dynamic",
         disabled=["ID_Retal"],
         key=f"editor_inv_{st.session_state.ver_editor_inv}",
+        column_order=("ID_Retal", "Diametro", "Longitud_mm", "Cantidad"),
         column_config={
             "ID_Retal": st.column_config.TextColumn("ID Retal (Auto)", disabled=True),
+            "Diametro": st.column_config.SelectboxColumn(
+                "Diámetro (NPS)",
+                options=list(DIAMETROS_COMERCIALES_NPS.keys()),
+                default=diametro_etiqueta,
+                required=True
+            ),
             "Longitud_mm": st.column_config.NumberColumn("Longitud (mm)", min_value=1, step=1),
             "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0, step=1)
         }
     )
 
-    # Reasignar automáticamente R1, R2, ..., Rn en cuanto se agregue o elimine una fila (sin descartar None/NaN)
+    # Reasignar automáticamente R1..Rn y diámetro por defecto al agregar o eliminar filas (sin descartar None/NaN)
     df_inv_norm, requiere_rerun_inv = normalizar_ids_inventario(
         df_inv_editado,
-        n_filas_base=len(st.session_state.inventario_base)
+        n_filas_base=len(st.session_state.inventario_base),
+        diametro_por_defecto=diametro_etiqueta
     )
     if requiere_rerun_inv:
         st.session_state.inventario_base = df_inv_norm
@@ -284,6 +283,14 @@ with tab_inv:
         st.rerun()
 
     st.session_state.inventario = df_inv_norm
+
+    # Aviso informativo de compatibilidad física por diámetro en Inventario
+    _, n_comp_inv, n_otros_inv = filtrar_inventario_por_diametro(st.session_state.inventario, diametro_etiqueta)
+    st.info(
+        f"🔎 Diámetro activo del proyecto: **{diametro_etiqueta}** · "
+        f"**{n_comp_inv}** retal(es) compatibles disponibles para esta orden | "
+        f"**{n_otros_inv}** retal(es) de otros diámetros quedarán reservados en almacén sin usarse."
+    )
 
     if st.session_state.paso_inv_ok and st.session_state.inv_confirmado_df is not None:
         if not df_inv_editado.reset_index(drop=True).equals(st.session_state.inv_confirmado_df.reset_index(drop=True)):
@@ -362,17 +369,23 @@ with tab_ped:
             st.error(msg_ped)
         else:
             try:
-                # Se ejecuta el motor de optimización DOS VECES con exactamente los mismos datos:
+                # Filtrado físico por diámetro: solo pasan al optimizador los retales del diámetro activo del proyecto.
+                df_inv_filtrado, n_comp_res, n_otros_res = filtrar_inventario_por_diametro(
+                    st.session_state.inventario, diametro_etiqueta
+                )
+
+                # Se ejecuta el motor de optimización DOS VECES con exactamente los mismos datos filtrados:
                 # 1) usar_orden_original=False -> Plan Optimizado (ordena piezas de mayor a menor, Best-Fit Decreasing).
                 # 2) usar_orden_original=True  -> Escenario Base (corta en el orden exacto en que se ingresaron).
                 # Comparar ambos escenarios permite cuantificar el ahorro real de tubos nuevos y descarte en mm.
                 with st.spinner("Optimizando cortes y calculando balance de material..."):
                     st.session_state.resultados = optimizar_cortes(
-                        st.session_state.inventario, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=False
+                        df_inv_filtrado, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=False
                     )
                     st.session_state.res_original = optimizar_cortes(
-                        st.session_state.inventario, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=True
+                        df_inv_filtrado, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=True
                     )
+                st.session_state.info_diametro_inv = (n_comp_res, n_otros_res, diametro_etiqueta)
                 st.session_state.ped_confirmado_df = st.session_state.pedidos.copy()
                 st.session_state.paso_ped_ok = True
                 st.rerun()
@@ -390,6 +403,13 @@ with tab_res:
     res = st.session_state.resultados
     bal = res["balance"]
     res_orig = st.session_state.res_original
+
+    if st.session_state.info_diametro_inv is not None:
+        n_comp_res, n_otros_res, diam_res = st.session_state.info_diametro_inv
+        st.info(
+            f"📏 Filtro físico por diámetro (**{diam_res}**): se evaluaron **{n_comp_res}** retal(es) compatibles "
+            f"y **{n_otros_res}** retal(es) de otros diámetros permanecieron reservados en almacén sin usarse."
+        )
 
     st.subheader("Balance de Materiales")
     col0, col1, col2, col3, col4 = st.columns(5)
