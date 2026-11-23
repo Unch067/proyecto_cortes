@@ -55,15 +55,54 @@ st.markdown("""
     }
 
     /* Estilo de botones principales */
-    .stButton>button {
+    .stButton>button[kind="primary"] {
         background-color: #ff4b4b; 
         color: white; 
         border-radius: 10px; 
         font-weight: bold;
         padding: 10px 24px;
     }
+
+    /* Barra de navegación por pasos (st.radio horizontal estilizado como pestañas modernas) */
+    div[role="radiogroup"] {
+        display: flex;
+        flex-direction: row;
+        gap: 10px;
+        background-color: #1E293B;
+        padding: 8px 10px;
+        border-radius: 12px;
+        border: 1px solid #334155;
+        margin-bottom: 14px;
+    }
+    div[role="radiogroup"] > label {
+        flex: 1;
+        justify-content: center;
+        background-color: #0F172A;
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    div[role="radiogroup"] > label:hover {
+        border-color: #38BDF8;
+    }
+    div[role="radiogroup"] > label[data-checked="true"],
+    div[role="radiogroup"] > label:has(input:checked) {
+        background-color: #ff4b4b !important;
+        border-color: #ff4b4b !important;
+        color: #ffffff !important;
+        font-weight: 700;
+    }
     </style>
 """, unsafe_allow_html=True)
+
+PASOS = [
+    "1. ⚙️ Configuración",
+    "2. 📦 Inventario",
+    "3. 📋 Pedidos",
+    "4. 📊 Resultados"
+]
 
 # ==========================================
 # 1. INICIALIZACIÓN Y PERSISTENCIA DE ESTADO
@@ -101,17 +140,21 @@ if "ver_editor_inv" not in st.session_state:
 if "ver_editor_ped" not in st.session_state:
     st.session_state.ver_editor_ped = 0
 
-# Estado del flujo secuencial guiado por pasos
-if "paso_conf_ok" not in st.session_state:
-    st.session_state.paso_conf_ok = False
+# Estado del flujo secuencial guiado por pasos y parámetros persistentes
+if "l_comercial" not in st.session_state:
+    st.session_state.l_comercial = DEFAULT_L_COMERCIAL
+if "kerf" not in st.session_state:
+    st.session_state.kerf = DEFAULT_KERF
+if "umbral" not in st.session_state:
+    st.session_state.umbral = DEFAULT_UMBRAL
+if "paso_actual" not in st.session_state:
+    st.session_state.paso_actual = PASOS[0]
+if "paso_completado" not in st.session_state:
+    st.session_state.paso_completado = 0
 if "conf_confirmada" not in st.session_state:
     st.session_state.conf_confirmada = None
-if "paso_inv_ok" not in st.session_state:
-    st.session_state.paso_inv_ok = False
 if "inv_confirmado_df" not in st.session_state:
     st.session_state.inv_confirmado_df = None
-if "paso_ped_ok" not in st.session_state:
-    st.session_state.paso_ped_ok = False
 if "ped_confirmado_df" not in st.session_state:
     st.session_state.ped_confirmado_df = None
 
@@ -133,37 +176,54 @@ with st.expander("📘 Guía Rápida de Uso (4 pasos sencillos)", expanded=True)
 # ==========================================
 # BARRA DE PROGRESO SECUENCIAL
 # ==========================================
-progreso = 0.0
-texto_progreso = "Paso 1 de 4 · Confirma los parámetros en '1. ⚙️ Configuración'"
-if st.session_state.paso_ped_ok and st.session_state.resultados:
-    progreso = 1.0
-    texto_progreso = "✅ ¡Plan de corte listo! Revisa la pestaña '4. 📊 Resultados'"
-elif st.session_state.paso_inv_ok:
-    progreso = 0.66
-    texto_progreso = "Paso 3 de 4 · Ingresa las piezas y calcula en '3. 📋 Pedidos'"
-elif st.session_state.paso_conf_ok:
-    progreso = 0.33
-    texto_progreso = "Paso 2 de 4 · Registra y confirma los retales en '2. 📦 Inventario'"
-
+progreso_map = {
+    0: (0.0, "Paso 1 de 4 · Confirma los parámetros en '1. ⚙️ Configuración'"),
+    1: (0.33, "Paso 2 de 4 · Registra y confirma los retales en '2. 📦 Inventario'"),
+    2: (0.66, "Paso 3 de 4 · Ingresa las piezas y calcula en '3. 📋 Pedidos'"),
+    3: (1.0, "✅ ¡Plan de corte listo! Revisa '4. 📊 Resultados'")
+}
+progreso, texto_progreso = progreso_map.get(st.session_state.paso_completado, progreso_map[0])
 st.progress(progreso, text=texto_progreso)
 
 # ==========================================
-# 2. SISTEMA DE PESTAÑAS SECUENCIALES
+# 2. NAVEGACIÓN CONTROLADA POR ESTADO (PASOS)
 # ==========================================
-tab_conf, tab_inv, tab_ped, tab_res = st.tabs([
-    "1. ⚙️ Configuración",
-    "2. 📦 Inventario",
-    "3. 📋 Pedidos",
-    "4. 📊 Resultados"
-])
+st.radio(
+    "Navegación por pasos",
+    options=PASOS,
+    horizontal=True,
+    label_visibility="collapsed",
+    key="paso_actual"
+)
 
-with tab_conf:
+paso_actual = st.session_state.paso_actual
+idx_paso_actual = PASOS.index(paso_actual)
+
+# Bloqueo hacia adelante si el usuario intenta saltar a un paso no desbloqueado
+if idx_paso_actual > st.session_state.paso_completado:
+    paso_requerido = PASOS[st.session_state.paso_completado]
+    st.warning(f"🔒 Paso bloqueado: primero debes validar y confirmar **{paso_requerido}**.")
+    if st.button(f"↩️ Ir a {paso_requerido}", type="primary"):
+        st.session_state.paso_actual = paso_requerido
+        st.rerun()
+    st.stop()
+
+# Recuperar parámetros globales persistidos
+l_comercial = int(st.session_state.l_comercial)
+kerf = int(st.session_state.kerf)
+umbral = int(st.session_state.umbral)
+
+# ==========================================
+# PASO 1: CONFIGURACIÓN
+# ==========================================
+if paso_actual == PASOS[0]:
     st.subheader("Paso 1: Parámetros Globales del Proyecto")
     col1, col2, col3 = st.columns(3)
+    opciones_tubo = [6000, 9000]
     l_comercial = int(col1.selectbox(
         "Tubo Nuevo Comercial (mm)",
-        options=[6000, 9000],
-        index=0,
+        options=opciones_tubo,
+        index=opciones_tubo.index(st.session_state.l_comercial),
         key="cfg_tubo"
     ))
     kerf = int(col2.number_input(
@@ -183,32 +243,27 @@ with tab_conf:
         key="cfg_umbral"
     ))
 
+    st.session_state.l_comercial = l_comercial
+    st.session_state.kerf = kerf
+    st.session_state.umbral = umbral
+
     conf_actual = (l_comercial, kerf, umbral)
-    if st.session_state.paso_conf_ok and st.session_state.conf_confirmada != conf_actual:
-        st.session_state.paso_conf_ok = False
-        st.session_state.paso_inv_ok = False
-        st.session_state.paso_ped_ok = False
+    if st.session_state.paso_completado >= 1 and st.session_state.conf_confirmada != conf_actual:
+        st.session_state.paso_completado = 0
         st.session_state.resultados = None
         st.session_state.res_original = None
         st.info("🔄 Modificaste un parámetro de configuración. Vuelve a confirmar este paso para continuar.")
 
-    if st.button("✅ Confirmar Configuración y Desbloquear Inventario", type="primary", use_container_width=True):
+    if st.button("✅ Confirmar Configuración y pasar a Inventario", type="primary", use_container_width=True):
         st.session_state.conf_confirmada = conf_actual
-        st.session_state.paso_conf_ok = True
+        st.session_state.paso_completado = max(st.session_state.paso_completado, 1)
+        st.session_state.paso_actual = PASOS[1]
         st.rerun()
 
-    if st.session_state.paso_conf_ok:
-        st.success("✅ Configuración confirmada. Ya puedes avanzar a la pestaña **2. 📦 Inventario**.")
-
-with tab_inv:
-    if not st.session_state.paso_conf_ok:
-        st.warning("🔒 Paso bloqueado: primero debes confirmar los parámetros en la pestaña **1. ⚙️ Configuración**.")
-        with tab_ped:
-            st.warning("🔒 Paso bloqueado: primero debes completar **1. ⚙️ Configuración** y **2. 📦 Inventario**.")
-        with tab_res:
-            st.warning("🔒 Paso bloqueado: completa y confirma los pasos 1, 2 y 3 para ver los resultados.")
-        st.stop()
-
+# ==========================================
+# PASO 2: INVENTARIO
+# ==========================================
+elif paso_actual == PASOS[1]:
     st.subheader("Paso 2: Retales Disponibles en Obra")
     archivo_inv = st.file_uploader(
         "📂 Cargar retales desde CSV (columnas: Diametro, Longitud_mm, Cantidad · ID_Retal se genera automáticamente · delimitador ',' o ';')",
@@ -230,8 +285,7 @@ with tab_inv:
                 st.session_state.inventario = df_csv_inv.copy()
                 st.session_state.csv_inv_firma = firma_inv
                 st.session_state.ver_editor_inv += 1
-                st.session_state.paso_inv_ok = False
-                st.session_state.paso_ped_ok = False
+                st.session_state.paso_completado = min(st.session_state.paso_completado, 1)
                 st.session_state.resultados = None
                 st.success("Inventario cargado correctamente desde CSV con códigos R1..Rn. Confirma este paso para continuar.")
                 if df_csv_inv.attrs.get("aviso_diametro_defecto"):
@@ -268,42 +322,40 @@ with tab_inv:
         st.session_state.inventario_base = df_inv_norm
         st.session_state.inventario = df_inv_norm.copy()
         st.session_state.ver_editor_inv += 1
-        st.session_state.paso_inv_ok = False
-        st.session_state.paso_ped_ok = False
+        st.session_state.paso_completado = min(st.session_state.paso_completado, 1)
         st.session_state.resultados = None
         st.session_state.res_original = None
         st.rerun()
 
     st.session_state.inventario = df_inv_norm
 
-    if st.session_state.paso_inv_ok and st.session_state.inv_confirmado_df is not None:
-        if not df_inv_editado.reset_index(drop=True).equals(st.session_state.inv_confirmado_df.reset_index(drop=True)):
-            st.session_state.paso_inv_ok = False
-            st.session_state.paso_ped_ok = False
+    if st.session_state.paso_completado >= 2 and st.session_state.inv_confirmado_df is not None:
+        if not df_inv_norm.reset_index(drop=True).equals(st.session_state.inv_confirmado_df.reset_index(drop=True)):
+            st.session_state.paso_completado = 1
             st.session_state.resultados = None
             st.session_state.res_original = None
             st.info("🔄 Modificaste el inventario. Vuelve a validarlo y confirmarlo para desbloquear Pedidos.")
 
-    if st.button("✅ Validar y Confirmar Inventario", type="primary", use_container_width=True):
+    col_prev_inv, col_next_inv = st.columns([1, 3])
+    if col_prev_inv.button("⬅️ Paso Anterior", key="btn_prev_inv", use_container_width=True):
+        st.session_state.paso_actual = PASOS[0]
+        st.rerun()
+
+    if col_next_inv.button("✅ Validar y Confirmar Inventario", type="primary", use_container_width=True):
         inv_ok, msg_inv = validar_inventario(st.session_state.inventario, l_comercial)
         if not inv_ok:
-            st.session_state.paso_inv_ok = False
+            st.session_state.paso_completado = min(st.session_state.paso_completado, 1)
             st.error(msg_inv)
         else:
             st.session_state.inv_confirmado_df = st.session_state.inventario.copy()
-            st.session_state.paso_inv_ok = True
+            st.session_state.paso_completado = max(st.session_state.paso_completado, 2)
+            st.session_state.paso_actual = PASOS[2]
             st.rerun()
 
-    if st.session_state.paso_inv_ok:
-        st.success("✅ Inventario validado y confirmado. Ya puedes avanzar a la pestaña **3. 📋 Pedidos**.")
-
-with tab_ped:
-    if not st.session_state.paso_inv_ok:
-        st.warning("🔒 Paso bloqueado: primero debes validar y confirmar tus retales en la pestaña **2. 📦 Inventario**.")
-        with tab_res:
-            st.warning("🔒 Paso bloqueado: primero debes confirmar **2. 📦 Inventario** y calcular en **3. 📋 Pedidos**.")
-        st.stop()
-
+# ==========================================
+# PASO 3: PEDIDOS
+# ==========================================
+elif paso_actual == PASOS[2]:
     st.subheader("Paso 3: Piezas Requeridas")
     archivo_ped = st.file_uploader(
         "📂 Cargar pedidos desde CSV (columnas: ID_Pieza, Diametro, Longitud_mm, Cantidad · delimitador ',' o ';')",
@@ -325,7 +377,7 @@ with tab_ped:
                 st.session_state.pedidos = df_csv_ped.copy()
                 st.session_state.csv_ped_firma = firma_ped
                 st.session_state.ver_editor_ped += 1
-                st.session_state.paso_ped_ok = False
+                st.session_state.paso_completado = min(st.session_state.paso_completado, 2)
                 st.session_state.resultados = None
                 st.success("Pedidos cargados correctamente desde CSV. Presiona Calcular Optimización.")
                 if df_csv_ped.attrs.get("aviso_diametro_defecto"):
@@ -352,17 +404,22 @@ with tab_ped:
     )
     st.session_state.pedidos = df_ped_editado
 
-    if st.session_state.paso_ped_ok and st.session_state.ped_confirmado_df is not None:
+    if st.session_state.paso_completado >= 3 and st.session_state.ped_confirmado_df is not None:
         if not df_ped_editado.reset_index(drop=True).equals(st.session_state.ped_confirmado_df.reset_index(drop=True)):
-            st.session_state.paso_ped_ok = False
+            st.session_state.paso_completado = 2
             st.session_state.resultados = None
             st.session_state.res_original = None
             st.info("🔄 Modificaste la lista de pedidos. Pulsa nuevamente 'Calcular Optimización' para actualizar los resultados.")
 
-    if st.button("🚀 Validar y Calcular Optimización", type="primary", use_container_width=True):
+    col_prev_ped, col_next_ped = st.columns([1, 3])
+    if col_prev_ped.button("⬅️ Paso Anterior", key="btn_prev_ped", use_container_width=True):
+        st.session_state.paso_actual = PASOS[1]
+        st.rerun()
+
+    if col_next_ped.button("🚀 Validar y Calcular Optimización", type="primary", use_container_width=True):
         ped_ok, msg_ped = validar_pedidos(st.session_state.pedidos, l_comercial, kerf)
         if not ped_ok:
-            st.session_state.paso_ped_ok = False
+            st.session_state.paso_completado = min(st.session_state.paso_completado, 2)
             st.error(msg_ped)
         else:
             try:
@@ -390,18 +447,23 @@ with tab_ped:
                         usar_orden_original=True
                     )
                 st.session_state.ped_confirmado_df = st.session_state.pedidos.copy()
-                st.session_state.paso_ped_ok = True
+                st.session_state.paso_completado = 3
+                st.session_state.paso_actual = PASOS[3]
                 st.rerun()
             except Exception as e:
                 st.error(f"⚠️ Ocurrió un error inesperado en el motor de optimización: {str(e)}")
 
-    if st.session_state.paso_ped_ok and st.session_state.resultados:
-        st.success("✅ ¡Cálculo exitoso! Ve a la pestaña **4. 📊 Resultados** para ver el plan de corte y el Gemelo Digital 3D.")
-
-with tab_res:
-    if not st.session_state.paso_ped_ok or not st.session_state.resultados:
-        st.warning("🔒 Paso bloqueado: primero debes validar y calcular tus piezas en la pestaña **3. 📋 Pedidos**.")
+# ==========================================
+# PASO 4: RESULTADOS
+# ==========================================
+elif paso_actual == PASOS[3]:
+    if not st.session_state.resultados:
+        st.warning("🔒 Paso bloqueado: primero debes validar y calcular tus piezas en **3. 📋 Pedidos**.")
         st.stop()
+
+    if st.button("⬅️ Paso Anterior (Modificar Pedidos)", key="btn_prev_res"):
+        st.session_state.paso_actual = PASOS[2]
+        st.rerun()
 
     res = st.session_state.resultados
     bal = res["balance"]
