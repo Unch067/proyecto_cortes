@@ -2,11 +2,13 @@ import io
 import unittest
 from unittest.mock import MagicMock
 import pandas as pd
-from core.optimizador import optimizar_cortes
+from core.optimizador import optimizar_cortes, optimizar_multi_diametro
 from components.validaciones import (
+    DIAMETROS_COMERCIALES_NPS,
     DEFAULT_DIAMETRO_ETIQUETA,
     validar_datos_entrada,
     validar_inventario,
+    validar_pedidos,
     cargar_csv_datos,
     normalizar_ids_inventario,
     filtrar_inventario_por_diametro
@@ -438,6 +440,69 @@ class TestOptimizadorCortes(unittest.TestCase):
         self.assertEqual(res["balance"]["material_total_origen"], 6000)
         self.assertEqual(res["balance"]["incorporado"], 2900)
         self.assertTrue(res["balance"]["cuadra_perfecto"])
+
+    def test_optimizacion_multi_diametro_y_gemelo_3d_proporcional(self):
+        diam_2 = '2" (Ø ext. 60.3 mm)'
+        diam_6 = '6" (Ø ext. 168.3 mm)'
+        diam_10 = '10" (Ø ext. 273.1 mm)'
+
+        # Validar que validar_pedidos rechace diámetros fuera de la tabla NPS
+        df_ped_malo = pd.DataFrame([
+            {"ID_Pieza": "PX", "Diametro": "7 pulgadas", "Longitud_mm": 2000, "Cantidad": 1}
+        ])
+        val_p, _ = validar_pedidos(df_ped_malo, self.l_comercial, self.kerf)
+        self.assertFalse(val_p)
+
+        # CSV de pedidos sin columna Diametro recibe 4" por defecto y marca aviso_diametro_defecto=True
+        df_csv_antiguo, err_ant = cargar_csv_datos(
+            io.StringIO("ID_Pieza,Longitud_mm,Cantidad\nP1,2000,1\n"), tipo="pedidos"
+        )
+        self.assertEqual(err_ant, "")
+        self.assertEqual(list(df_csv_antiguo["Diametro"]), [DEFAULT_DIAMETRO_ETIQUETA])
+        self.assertTrue(df_csv_antiguo.attrs.get("aviso_diametro_defecto"))
+
+        # Escenario multi-diámetro:
+        # Inventario: retal R1 de 2" (3000 mm), retal R2 de 10" (4000 mm, NO pedido -> reservado)
+        df_ret = pd.DataFrame([
+            {"ID_Retal": "R1", "Diametro": diam_2, "Longitud_mm": 3000, "Cantidad": 1},
+            {"ID_Retal": "R2", "Diametro": diam_10, "Longitud_mm": 4000, "Cantidad": 1}
+        ])
+        # Pedidos: P_2 (2500 mm en 2") y P_6 (3000 mm en 6")
+        df_ped = pd.DataFrame([
+            {"ID_Pieza": "P_2", "Diametro": diam_2, "Longitud_mm": 2500, "Cantidad": 1},
+            {"ID_Pieza": "P_6", "Diametro": diam_6, "Longitud_mm": 3000, "Cantidad": 1}
+        ])
+
+        res = optimizar_multi_diametro(
+            df_ret, df_ped, self.l_comercial, self.kerf, self.umbral,
+            DIAMETROS_COMERCIALES_NPS, diametro_defecto=DEFAULT_DIAMETRO_ETIQUETA
+        )
+
+        # P_2 usa el retal de 2" (0 tubos nuevos de 2"); P_6 compra 1 tubo nuevo de 6" (sin tocar retal de 10")
+        self.assertEqual(res["tubos_comprados"], 1)
+        self.assertEqual(res["tubos_por_diametro"][diam_2], 0)
+        self.assertEqual(res["tubos_por_diametro"][diam_6], 1)
+        self.assertEqual(len(res["retales_reservados"]), 1)
+        self.assertEqual(res["retales_reservados"][0]["ID_Retal"], "R2")
+        self.assertEqual(res["balance"]["material_total_origen"], 3000 + 6000)
+        self.assertTrue(res["balance"]["cuadra_perfecto"])
+
+        # Ninguna barra mezcla piezas de distintos diámetros
+        for fila in res["detalle_csv"]:
+            if fila["Diametro"] == diam_2:
+                self.assertIn("P_2", fila["Piezas_Asignadas"])
+                self.assertNotIn("P_6", fila["Piezas_Asignadas"])
+            elif fila["Diametro"] == diam_6:
+                self.assertIn("P_6", fila["Piezas_Asignadas"])
+                self.assertNotIn("P_2", fila["Piezas_Asignadas"])
+
+        # Gemelo 3D escala cada bancada con su propio diámetro (2" -> radio 30.15 mm; 6" -> radio 84.15 mm)
+        fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=self.kerf)
+        trazas_piezas = [t for t in fig_3d.data if t.color == "#1E88E5"]
+        self.assertEqual(len(trazas_piezas), 2)
+        radios_z = sorted(round(max(t.z), 2) for t in trazas_piezas)
+        self.assertAlmostEqual(radios_z[0], 30.15, places=1)
+        self.assertAlmostEqual(radios_z[1], 84.15, places=1)
 
 
 if __name__ == "__main__":

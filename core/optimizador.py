@@ -186,3 +186,106 @@ def optimizar_cortes(df_retales, df_pedidos, l_comercial, kerf, umbral, usar_ord
         "detalle_csv": plan_csv,
         "pendientes": piezas_pendientes
     }
+
+
+def optimizar_multi_diametro(
+    df_retales,
+    df_pedidos,
+    l_comercial,
+    kerf,
+    umbral,
+    diametros_map,
+    diametro_defecto='4" (Ø ext. 114.3 mm)',
+    usar_orden_original=False
+):
+    """
+    Ejecuta la optimización de cortes agrupando los pedidos por diámetro comercial NPS.
+    Para cada diámetro presente en los pedidos, filtra únicamente los retales de Inventario
+    que coinciden exactamente con ese diámetro y consolida el balance de masa global,
+    el detalle por barra (con columnas 'Diametro' y 'Diametro_mm'), el desglose de tubos
+    nuevos por diámetro y los retales de otros diámetros reservados en almacén.
+    """
+    df_ped = df_pedidos.copy() if not df_pedidos.empty else pd.DataFrame(columns=["ID_Pieza", "Diametro", "Longitud_mm", "Cantidad"])
+    df_ret = df_retales.copy() if not df_retales.empty else pd.DataFrame(columns=["ID_Retal", "Diametro", "Longitud_mm", "Cantidad"])
+
+    if "Diametro" not in df_ped.columns:
+        df_ped["Diametro"] = diametro_defecto
+    if "Diametro" not in df_ret.columns:
+        df_ret["Diametro"] = diametro_defecto
+
+    df_ped_act = df_ped[df_ped["Cantidad"] > 0].copy() if not df_ped.empty else df_ped
+    df_ret_act = df_ret[df_ret["Cantidad"] > 0].copy() if not df_ret.empty else df_ret
+
+    diametros_pedidos = list(dict.fromkeys(df_ped_act["Diametro"].tolist())) if not df_ped_act.empty else []
+
+    balance_global = {
+        "material_total_origen": 0,
+        "incorporado": 0,
+        "perdida": 0,
+        "descarte": 0,
+        "nuevo_retal": 0
+    }
+    tubos_totales = 0
+    tubos_por_diametro = {}
+    detalle_global = []
+    pendientes_globales = []
+
+    for diam in diametros_pedidos:
+        sub_ped = df_ped_act[df_ped_act["Diametro"] == diam]
+        sub_ret = df_ret_act[df_ret_act["Diametro"] == diam] if not df_ret_act.empty else pd.DataFrame()
+
+        res_d = optimizar_cortes(
+            sub_ret, sub_ped, l_comercial, kerf, umbral, usar_orden_original=usar_orden_original
+        )
+
+        diam_mm = float(diametros_map.get(diam, 114.3))
+        diam_corto = diam.split(" (")[0]
+
+        tubos_por_diametro[diam] = res_d["tubos_comprados"]
+        tubos_totales += res_d["tubos_comprados"]
+
+        for clave in balance_global:
+            balance_global[clave] += res_d["balance"][clave]
+
+        for fila in res_d["detalle_csv"]:
+            fila_con_diam = {
+                "Origen_ID": f"{fila['Origen_ID']} [{diam_corto}]",
+                "Diametro": diam,
+                "Diametro_mm": diam_mm,
+                "Tipo": fila["Tipo"],
+                "Longitud_Inicial": fila["Longitud_Inicial"],
+                "Piezas_Asignadas": fila["Piezas_Asignadas"],
+                "Kerf_Total": fila["Kerf_Total"],
+                "Sobrante_mm": fila["Sobrante_mm"],
+                "Clasificacion": fila["Clasificacion"]
+            }
+            detalle_global.append(fila_con_diam)
+
+        for p in res_d["pendientes"]:
+            p_copy = dict(p)
+            p_copy["Diametro"] = diam
+            pendientes_globales.append(p_copy)
+
+    total_calc = (
+        balance_global["incorporado"]
+        + balance_global["perdida"]
+        + balance_global["descarte"]
+        + balance_global["nuevo_retal"]
+    )
+    balance_global["cuadra_perfecto"] = (balance_global["material_total_origen"] == total_calc)
+
+    # Retales en almacén cuyos diámetros no fueron solicitados en los pedidos de esta orden
+    if not df_ret_act.empty:
+        df_reservados = df_ret_act[~df_ret_act["Diametro"].isin(diametros_pedidos)].copy()
+        retales_reservados = df_reservados[["ID_Retal", "Diametro", "Longitud_mm", "Cantidad"]].to_dict("records")
+    else:
+        retales_reservados = []
+
+    return {
+        "tubos_comprados": tubos_totales,
+        "tubos_por_diametro": tubos_por_diametro,
+        "balance": balance_global,
+        "detalle_csv": detalle_global,
+        "pendientes": pendientes_globales,
+        "retales_reservados": retales_reservados
+    }

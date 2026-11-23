@@ -1,14 +1,13 @@
 import streamlit as st
 import pandas as pd
-from core.optimizador import optimizar_cortes
+from core.optimizador import optimizar_multi_diametro
 from components.validaciones import (
     DIAMETROS_COMERCIALES_NPS,
     DEFAULT_DIAMETRO_ETIQUETA,
     validar_inventario,
     validar_pedidos,
     cargar_csv_datos,
-    normalizar_ids_inventario,
-    filtrar_inventario_por_diametro
+    normalizar_ids_inventario
 )
 from components.graficos import (
     crear_gemelo_digital_3d,
@@ -82,10 +81,10 @@ if "info_diametro_inv" not in st.session_state:
     st.session_state.info_diametro_inv = None
 if "pedidos_base" not in st.session_state:
     st.session_state.pedidos_base = pd.DataFrame([
-        {"ID_Pieza": "P2900", "Longitud_mm": 2900, "Cantidad": 1},
-        {"ID_Pieza": "P2000", "Longitud_mm": 2000, "Cantidad": 1},
-        {"ID_Pieza": "P1900", "Longitud_mm": 1900, "Cantidad": 1},
-        {"ID_Pieza": "P1800", "Longitud_mm": 1800, "Cantidad": 1}
+        {"ID_Pieza": "P2900", "Diametro": DEFAULT_DIAMETRO_ETIQUETA, "Longitud_mm": 2900, "Cantidad": 1},
+        {"ID_Pieza": "P2000", "Diametro": DEFAULT_DIAMETRO_ETIQUETA, "Longitud_mm": 2000, "Cantidad": 1},
+        {"ID_Pieza": "P1900", "Diametro": DEFAULT_DIAMETRO_ETIQUETA, "Longitud_mm": 1900, "Cantidad": 1},
+        {"ID_Pieza": "P1800", "Diametro": DEFAULT_DIAMETRO_ETIQUETA, "Longitud_mm": 1800, "Cantidad": 1}
     ])
 if "pedidos" not in st.session_state:
     st.session_state.pedidos = st.session_state.pedidos_base.copy()
@@ -124,11 +123,11 @@ st.caption("Herramienta de control de descarte, balance de masa y layout de tall
 # ==========================================
 with st.expander("📘 Guía Rápida de Uso (4 pasos sencillos)", expanded=True):
     st.markdown("""
-    Bienvenido a **OptiCorte 1D**. Sigue estos **4 pasos en orden** para calcular tu plan de corte sin errores:
-    1. **⚙️ Configuración:** Elige el largo del tubo nuevo comercial (`6000 mm` o `9000 mm`) y selecciona el **diámetro comercial (NPS)** del tubo según la norma ANSI/ASME B36.10M. La pérdida por corte (`4 mm`) y el retal mínimo (`200 mm`) son parámetros fijos estándar. Luego pulsa **Confirmar Configuración**.
-    2. **📦 Inventario:** Anota los sobrantes (**retales**) que ya tienes en almacén (o súbelos desde un archivo CSV) y pulsa **Validar y Confirmar Inventario**.
-    3. **📋 Pedidos:** Escribe las piezas que necesitas cortar hoy (o cárgalas desde CSV) y pulsa **Validar y Calcular Optimización**.
-    4. **📊 Resultados:** Consulta cuántos tubos nuevos debes comprar, descarga la hoja de ruta para la sierra y revisa el modelo 3D y el simulador de corte.
+    Bienvenido a **OptiCorte 1D**. Ahora puedes **mezclar múltiples diámetros comerciales NPS** (norma ANSI/ASME B36.10M) tanto en tu inventario como en tus pedidos dentro de un mismo proyecto. Sigue estos **4 pasos en orden**:
+    1. **⚙️ Configuración:** Elige la longitud del tubo nuevo comercial (`6000 mm` o `9000 mm`). La pérdida por corte (`4 mm`) y el retal mínimo (`200 mm`) son parámetros fijos estándar. Luego pulsa **Confirmar Configuración**.
+    2. **📦 Inventario:** Registra tus sobrantes (**retales**) indicando su **Diámetro (NPS)**, longitud y cantidad (o cárgalos desde CSV). Los códigos `R1..Rn` se generan automáticamente. Pulsa **Validar y Confirmar Inventario**.
+    3. **📋 Pedidos:** Escribe las piezas requeridas indicando su **Diámetro (NPS)**, longitud y cantidad (o cárgalas desde CSV) y pulsa **Validar y Calcular Optimización**. El motor agrupará cada diámetro por separado sin mezclar medidas distintas.
+    4. **📊 Resultados:** Consulta los tubos nuevos por diámetro, el balance de masa global, los retales reservados en almacén, el **Gemelo Digital 3D multi-diámetro** y el simulador paso a paso.
     """)
 
 # ==========================================
@@ -159,8 +158,8 @@ tab_conf, tab_inv, tab_ped, tab_res = st.tabs([
 ])
 
 with tab_conf:
-    st.subheader("Paso 1: Parámetros del Proyecto")
-    col1, col2, col3, col4 = st.columns(4)
+    st.subheader("Paso 1: Parámetros Globales del Proyecto")
+    col1, col2, col3 = st.columns(3)
     l_comercial = int(col1.selectbox(
         "Tubo Nuevo Comercial (mm)",
         options=[6000, 9000],
@@ -175,16 +174,7 @@ with tab_conf:
         disabled=True,
         key="cfg_kerf"
     ))
-    opciones_diametro = list(DIAMETROS_COMERCIALES_NPS.keys())
-    diametro_etiqueta = col3.selectbox(
-        "Diámetro del Tubo (NPS)",
-        options=opciones_diametro,
-        index=opciones_diametro.index(DEFAULT_DIAMETRO_ETIQUETA),
-        key="cfg_diametro"
-    )
-    diametro_mm = float(DIAMETROS_COMERCIALES_NPS[diametro_etiqueta])
-    col3.caption(f"Norma ANSI/ASME B36.10M · Ø ext.: **{diametro_mm:.1f} mm**")
-    umbral = int(col4.number_input(
+    umbral = int(col3.number_input(
         "Retal Mínimo (mm)",
         min_value=0,
         value=DEFAULT_UMBRAL,
@@ -193,7 +183,7 @@ with tab_conf:
         key="cfg_umbral"
     ))
 
-    conf_actual = (l_comercial, kerf, umbral, diametro_etiqueta)
+    conf_actual = (l_comercial, kerf, umbral)
     if st.session_state.paso_conf_ok and st.session_state.conf_confirmada != conf_actual:
         st.session_state.paso_conf_ok = False
         st.session_state.paso_inv_ok = False
@@ -221,7 +211,7 @@ with tab_inv:
 
     st.subheader("Paso 2: Retales Disponibles en Obra")
     archivo_inv = st.file_uploader(
-        "📂 Cargar retales desde CSV (requiere Longitud_mm, Cantidad; Diametro opcional · ID_Retal se genera automáticamente · delimitador ',' o ';')",
+        "📂 Cargar retales desde CSV (columnas: Diametro, Longitud_mm, Cantidad · ID_Retal se genera automáticamente · delimitador ',' o ';')",
         type=["csv"],
         key="uploader_inv"
     )
@@ -231,7 +221,7 @@ with tab_inv:
             df_csv_inv, err_inv = cargar_csv_datos(
                 archivo_inv,
                 tipo="inventario",
-                diametro_por_defecto=diametro_etiqueta
+                diametro_por_defecto=DEFAULT_DIAMETRO_ETIQUETA
             )
             if err_inv:
                 st.error(err_inv)
@@ -244,6 +234,8 @@ with tab_inv:
                 st.session_state.paso_ped_ok = False
                 st.session_state.resultados = None
                 st.success("Inventario cargado correctamente desde CSV con códigos R1..Rn. Confirma este paso para continuar.")
+                if df_csv_inv.attrs.get("aviso_diametro_defecto"):
+                    st.info(f"ℹ️ El CSV no contenía columna 'Diametro'; se asignó **{DEFAULT_DIAMETRO_ETIQUETA}** por defecto.")
     else:
         st.session_state.csv_inv_firma = None
 
@@ -258,7 +250,7 @@ with tab_inv:
             "Diametro": st.column_config.SelectboxColumn(
                 "Diámetro (NPS)",
                 options=list(DIAMETROS_COMERCIALES_NPS.keys()),
-                default=diametro_etiqueta,
+                default=DEFAULT_DIAMETRO_ETIQUETA,
                 required=True
             ),
             "Longitud_mm": st.column_config.NumberColumn("Longitud (mm)", min_value=1, step=1),
@@ -270,7 +262,7 @@ with tab_inv:
     df_inv_norm, requiere_rerun_inv = normalizar_ids_inventario(
         df_inv_editado,
         n_filas_base=len(st.session_state.inventario_base),
-        diametro_por_defecto=diametro_etiqueta
+        diametro_por_defecto=DEFAULT_DIAMETRO_ETIQUETA
     )
     if requiere_rerun_inv:
         st.session_state.inventario_base = df_inv_norm
@@ -283,14 +275,6 @@ with tab_inv:
         st.rerun()
 
     st.session_state.inventario = df_inv_norm
-
-    # Aviso informativo de compatibilidad física por diámetro en Inventario
-    _, n_comp_inv, n_otros_inv = filtrar_inventario_por_diametro(st.session_state.inventario, diametro_etiqueta)
-    st.info(
-        f"🔎 Diámetro activo del proyecto: **{diametro_etiqueta}** · "
-        f"**{n_comp_inv}** retal(es) compatibles disponibles para esta orden | "
-        f"**{n_otros_inv}** retal(es) de otros diámetros quedarán reservados en almacén sin usarse."
-    )
 
     if st.session_state.paso_inv_ok and st.session_state.inv_confirmado_df is not None:
         if not df_inv_editado.reset_index(drop=True).equals(st.session_state.inv_confirmado_df.reset_index(drop=True)):
@@ -322,14 +306,18 @@ with tab_ped:
 
     st.subheader("Paso 3: Piezas Requeridas")
     archivo_ped = st.file_uploader(
-        "📂 Cargar pedidos desde CSV (columnas: ID_Pieza, Longitud_mm, Cantidad · delimitador ',' o ';')",
+        "📂 Cargar pedidos desde CSV (columnas: ID_Pieza, Diametro, Longitud_mm, Cantidad · delimitador ',' o ';')",
         type=["csv"],
         key="uploader_ped"
     )
     if archivo_ped is not None:
         firma_ped = (archivo_ped.name, archivo_ped.size)
         if firma_ped != st.session_state.csv_ped_firma:
-            df_csv_ped, err_ped = cargar_csv_datos(archivo_ped, tipo="pedidos")
+            df_csv_ped, err_ped = cargar_csv_datos(
+                archivo_ped,
+                tipo="pedidos",
+                diametro_por_defecto=DEFAULT_DIAMETRO_ETIQUETA
+            )
             if err_ped:
                 st.error(err_ped)
             else:
@@ -340,6 +328,8 @@ with tab_ped:
                 st.session_state.paso_ped_ok = False
                 st.session_state.resultados = None
                 st.success("Pedidos cargados correctamente desde CSV. Presiona Calcular Optimización.")
+                if df_csv_ped.attrs.get("aviso_diametro_defecto"):
+                    st.info(f"ℹ️ El CSV no contenía columna 'Diametro'; se asignó **{DEFAULT_DIAMETRO_ETIQUETA}** por defecto.")
     else:
         st.session_state.csv_ped_firma = None
 
@@ -347,8 +337,15 @@ with tab_ped:
         st.session_state.pedidos_base,
         num_rows="dynamic",
         key=f"editor_ped_{st.session_state.ver_editor_ped}",
+        column_order=("ID_Pieza", "Diametro", "Longitud_mm", "Cantidad"),
         column_config={
             "ID_Pieza": st.column_config.TextColumn("ID Pieza", required=True),
+            "Diametro": st.column_config.SelectboxColumn(
+                "Diámetro (NPS)",
+                options=list(DIAMETROS_COMERCIALES_NPS.keys()),
+                default=DEFAULT_DIAMETRO_ETIQUETA,
+                required=True
+            ),
             "Longitud_mm": st.column_config.NumberColumn("Longitud (mm)", min_value=1, step=1, required=True),
             "Cantidad": st.column_config.NumberColumn("Cantidad", min_value=0, step=1, required=True)
         }
@@ -369,23 +366,29 @@ with tab_ped:
             st.error(msg_ped)
         else:
             try:
-                # Filtrado físico por diámetro: solo pasan al optimizador los retales del diámetro activo del proyecto.
-                df_inv_filtrado, n_comp_res, n_otros_res = filtrar_inventario_por_diametro(
-                    st.session_state.inventario, diametro_etiqueta
-                )
-
-                # Se ejecuta el motor de optimización DOS VECES con exactamente los mismos datos filtrados:
-                # 1) usar_orden_original=False -> Plan Optimizado (ordena piezas de mayor a menor, Best-Fit Decreasing).
-                # 2) usar_orden_original=True  -> Escenario Base (corta en el orden exacto en que se ingresaron).
-                # Comparar ambos escenarios permite cuantificar el ahorro real de tubos nuevos y descarte en mm.
-                with st.spinner("Optimizando cortes y calculando balance de material..."):
-                    st.session_state.resultados = optimizar_cortes(
-                        df_inv_filtrado, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=False
+                # Optimización agrupada por diámetro comercial NPS (dos pasadas: Optimizado BFD vs Orden Original).
+                # Cada diámetro usa únicamente los retales de inventario que coinciden exactamente con ese diámetro.
+                with st.spinner("Optimizando cortes por diámetro y calculando balance global de material..."):
+                    st.session_state.resultados = optimizar_multi_diametro(
+                        st.session_state.inventario,
+                        st.session_state.pedidos,
+                        l_comercial,
+                        kerf,
+                        umbral,
+                        DIAMETROS_COMERCIALES_NPS,
+                        diametro_defecto=DEFAULT_DIAMETRO_ETIQUETA,
+                        usar_orden_original=False
                     )
-                    st.session_state.res_original = optimizar_cortes(
-                        df_inv_filtrado, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=True
+                    st.session_state.res_original = optimizar_multi_diametro(
+                        st.session_state.inventario,
+                        st.session_state.pedidos,
+                        l_comercial,
+                        kerf,
+                        umbral,
+                        DIAMETROS_COMERCIALES_NPS,
+                        diametro_defecto=DEFAULT_DIAMETRO_ETIQUETA,
+                        usar_orden_original=True
                     )
-                st.session_state.info_diametro_inv = (n_comp_res, n_otros_res, diametro_etiqueta)
                 st.session_state.ped_confirmado_df = st.session_state.pedidos.copy()
                 st.session_state.paso_ped_ok = True
                 st.rerun()
@@ -404,20 +407,29 @@ with tab_res:
     bal = res["balance"]
     res_orig = st.session_state.res_original
 
-    if st.session_state.info_diametro_inv is not None:
-        n_comp_res, n_otros_res, diam_res = st.session_state.info_diametro_inv
-        st.info(
-            f"📏 Filtro físico por diámetro (**{diam_res}**): se evaluaron **{n_comp_res}** retal(es) compatibles "
-            f"y **{n_otros_res}** retal(es) de otros diámetros permanecieron reservados en almacén sin usarse."
-        )
-
-    st.subheader("Balance de Materiales")
+    st.subheader("Balance Global de Materiales")
     col0, col1, col2, col3, col4 = st.columns(5)
     col0.metric("Material Origen (Total)", f"{bal['material_total_origen']} mm")
-    col1.metric("Tubos Nuevos a Comprar", res["tubos_comprados"])
+    col1.metric("Tubos Nuevos (Total)", res["tubos_comprados"])
     col2.metric("Material Incorporado", f"{bal['incorporado']} mm")
     col3.metric("Pérdida por Corte", f"{bal['perdida']} mm")
     col4.metric("Descarte Inútil", f"{bal['descarte']} mm")
+
+    if res.get("tubos_por_diametro"):
+        st.caption("**Desglose de Tubos Nuevos a Comprar por Diámetro (NPS):**")
+        df_tubos_diam = pd.DataFrame([
+            {"Diámetro (NPS)": d, "Tubos Nuevos": c}
+            for d, c in res["tubos_por_diametro"].items()
+        ])
+        st.dataframe(df_tubos_diam, use_container_width=True, hide_index=True)
+
+    if res.get("retales_reservados"):
+        with st.expander(
+            f"📦 Retales de otros diámetros reservados en almacén ({len(res['retales_reservados'])} registro(s) no consumidos)",
+            expanded=False
+        ):
+            st.write("Estos retales pertenecen a diámetros que no fueron solicitados en los pedidos de esta orden y permanecen intactos en almacén:")
+            st.dataframe(pd.DataFrame(res["retales_reservados"]), use_container_width=True, hide_index=True)
 
     if not bal["cuadra_perfecto"]:
         st.error("⚠️ Alerta: El balance de masas no cuadra con el material de origen.")
@@ -463,11 +475,7 @@ with tab_res:
     c1.download_button("Descargar Plan (CSV)", df_plan.to_csv(index=False).encode('utf-8'), "plan.csv", "text/csv")
     c2.download_button("Descargar Balance (CSV)", pd.DataFrame([bal]).to_csv(index=False).encode('utf-8'), "balance.csv", "text/csv")
 
-    texto_reporte = generar_reporte_texto(
-        res, res_orig, l_comercial, kerf, umbral,
-        diametro_mm=diametro_mm,
-        diametro_etiqueta=diametro_etiqueta
-    )
+    texto_reporte = generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral)
     c3.download_button("Descargar Informe Técnico", texto_reporte.encode('utf-8'), "informe_tecnico_corte.txt", "text/plain")
 
     if res["pendientes"]:
@@ -476,19 +484,34 @@ with tab_res:
         c4.download_button("Descargar Pendientes", pd.DataFrame(res["pendientes"]).to_csv(index=False).encode('utf-8'), "pendientes.csv", "text/csv")
 
     # ==========================================
-    # 3. GEMELO DIGITAL 3D (LAYOUT DE TALLER)
+    # 3. GEMELO DIGITAL 3D (LAYOUT DE TALLER MULTI-DIÁMETRO)
     # ==========================================
     if res["detalle_csv"]:
         st.markdown("---")
         st.subheader("📐 Gemelo Digital 3D: Layout de Taller")
-        st.write(f"Simulación volumétrica de tubos cilíndricos huecos — **NPS {diametro_etiqueta}**. **Gira, rota o amplía** el modelo con el cursor:")
 
-        fig_3d = crear_gemelo_digital_3d(
-            res["detalle_csv"],
-            kerf_nominal=kerf,
-            diametro_mm=diametro_mm,
-            diametro_etiqueta=diametro_etiqueta
+        diametros_en_plan = list(dict.fromkeys(
+            f.get("Diametro", DEFAULT_DIAMETRO_ETIQUETA) for f in res["detalle_csv"]
+        ))
+        filtro_diam_3d = st.selectbox(
+            "Filtrar vista 3D y simulador por diámetro:",
+            options=["Todos los diámetros"] + diametros_en_plan,
+            index=0,
+            key="filtro_diam_resultados"
         )
+
+        detalle_visible = (
+            res["detalle_csv"]
+            if filtro_diam_3d == "Todos los diámetros"
+            else [f for f in res["detalle_csv"] if f.get("Diametro") == filtro_diam_3d]
+        )
+
+        st.write(
+            "Simulación volumétrica de tubos cilíndricos huecos escalados a su diámetro exterior real (ANSI/ASME B36.10M). "
+            "**Gira, rota o amplía** el modelo con el cursor:"
+        )
+
+        fig_3d = crear_gemelo_digital_3d(detalle_visible, kerf_nominal=kerf)
         st.plotly_chart(fig_3d, use_container_width=True)
 
         # ==========================================
@@ -498,12 +521,13 @@ with tab_res:
         st.subheader("⚙️ Simulador de Taller: Avance de Corte")
         st.write("Selecciona una barra y desplaza el carro de la sierra para simular el proceso físico de seccionamiento:")
 
-        lista_origenes = [f["Origen_ID"] for f in res["detalle_csv"]]
+        lista_origenes = [f["Origen_ID"] for f in detalle_visible]
         col_sel_barra, col_slider = st.columns([1, 3])
 
         with col_sel_barra:
             barra_sel_id = st.selectbox("Barra a simular:", lista_origenes, key="sel_sim_barra")
-            fila_sel = next((f for f in res["detalle_csv"] if f["Origen_ID"] == barra_sel_id), res["detalle_csv"][0])
+            fila_sel = next((f for f in detalle_visible if f["Origen_ID"] == barra_sel_id), detalle_visible[0])
+            st.caption(f"**Diámetro:** {fila_sel.get('Diametro', DEFAULT_DIAMETRO_ETIQUETA)}")
             st.caption(f"**Longitud inicial:** {fila_sel['Longitud_Inicial']} mm")
             st.caption(f"**Piezas a extraer:** {fila_sel['Piezas_Asignadas']}")
 

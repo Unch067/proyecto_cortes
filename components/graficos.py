@@ -67,24 +67,36 @@ def _crear_cilindro_hueco_malla(
 def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=114.3, diametro_etiqueta=None):
     """
     Genera el entorno 3D interactivo con tubos cilíndricos huecos escalados
-    según el diámetro exterior real (norma ANSI/ASME B36.10M) y relación de aspecto calibrada.
+    individualmente según el diámetro real de cada bancada ('Diametro_mm' si existe,
+    o 'diametro_mm' por defecto) bajo la norma ANSI/ASME B36.10M.
     """
     fig = go.Figure()
-
-    diam = max(15.0, float(diametro_mm))
-    texto_diam = diametro_etiqueta if diametro_etiqueta else f"{diam:.1f} mm"
-    radio_ext = diam / 2.0
-    radio_int = radio_ext * 0.72  # Espesor de pared visible (28% del radio)
-    radio_ext_kerf = radio_ext * 1.18
-    radio_int_kerf = radio_int * 0.92
-    paso_y = max(240.0, diam * 2.8)  # Separación física proporcional al diámetro
 
     nombres_eje_y = []
     posiciones_eje_y = []
 
+    y_actual = 0.0
+    radio_anterior = None
+
     for idx, fila in enumerate(detalle_csv):
         origen_id = fila["Origen_ID"]
-        y_pos = idx * paso_y
+        diam_fila = max(15.0, float(fila.get("Diametro_mm", diametro_mm)))
+        etiqueta_fila = fila.get("Diametro") or diametro_etiqueta or f"{diam_fila:.1f} mm"
+
+        radio_ext = diam_fila / 2.0
+        radio_int = radio_ext * 0.72  # Espesor de pared visible (28% del radio)
+        radio_ext_kerf = radio_ext * 1.18
+        radio_int_kerf = radio_int * 0.92
+
+        # Separación dinámica en Y proporcional a los radios adyacentes para evitar solapamientos
+        if idx == 0:
+            y_pos = 0.0
+        else:
+            margen_y = max(150.0, (radio_anterior + radio_ext) * 1.15)
+            y_pos = y_actual + radio_anterior + radio_ext + margen_y
+        y_actual = y_pos
+        radio_anterior = radio_ext
+
         nombres_eje_y.append(origen_id)
         posiciones_eje_y.append(y_pos)
 
@@ -101,7 +113,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=114.3, diam
                     f"<b>Bancada:</b> {origen_id}<br>"
                     f"<b>Pieza:</b> {nombre}<br>"
                     f"<b>Longitud:</b> {largo} mm<br>"
-                    f"<b>Diámetro:</b> {texto_diam}<br>"
+                    f"<b>Diámetro:</b> {etiqueta_fila}<br>"
                     f"<b>Tramo:</b> [{x_actual} - {x_actual + largo} mm]"
                 )
                 fig.add_trace(_crear_cilindro_hueco_malla(
@@ -140,7 +152,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=114.3, diam
                 f"<b>Bancada:</b> {origen_id}<br>"
                 f"<b>Estado:</b> {clasif}<br>"
                 f"<b>Longitud:</b> {sobrante_mm} mm<br>"
-                f"<b>Diámetro:</b> {texto_diam}"
+                f"<b>Diámetro:</b> {etiqueta_fila}"
             )
             fig.add_trace(_crear_cilindro_hueco_malla(
                 x0=x_actual,
@@ -489,7 +501,10 @@ def generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral, diametro_mm=
     lineas.append("# INFORME TÉCNICO DE CORTE Y BALANCE DE MATERIAL")
     lineas.append("==================================================")
     lineas.append(f"- Longitud Comercial Estándar: {l_comercial} mm")
-    if diametro_etiqueta:
+    if res.get("tubos_por_diametro"):
+        diams_str = ", ".join(res["tubos_por_diametro"].keys())
+        lineas.append(f"- Diámetros en Proyecto (NPS): {diams_str}")
+    elif diametro_etiqueta:
         lineas.append(f"- Diámetro Comercial (NPS):    {diametro_etiqueta}")
     else:
         lineas.append(f"- Diámetro del Tubo:           {diametro_mm} mm ({diametro_mm / 25.4:.2f} in)")
@@ -500,6 +515,9 @@ def generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral, diametro_mm=
     lineas.append("--------------------------------------------------")
     lineas.append(f"Material Origen Total:  {bal['material_total_origen']} mm")
     lineas.append(f"Tubos Nuevos a Comprar: {res['tubos_comprados']} unidades")
+    if res.get("tubos_por_diametro"):
+        for d_etq, cant_t in res["tubos_por_diametro"].items():
+            lineas.append(f"  * {d_etq}: {cant_t} tubo(s)")
     lineas.append(f"Material Incorporado:   {bal['incorporado']} mm")
     lineas.append(f"Pérdida por Corte:      {bal['perdida']} mm")
     lineas.append(f"Descarte Inútil:        {bal['descarte']} mm")

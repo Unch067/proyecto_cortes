@@ -85,7 +85,7 @@ def cargar_csv_datos(archivo, tipo="inventario", diametro_por_defecto=DEFAULT_DI
                 f"Se requieren: {', '.join(columnas_esperadas)}."
             )
 
-        tiene_col_diametro = es_inventario and ("Diametro" in df.columns)
+        tiene_col_diametro = ("Diametro" in df.columns)
         cols_a_extraer = columnas_esperadas + (["Diametro"] if tiene_col_diametro else [])
         df = df[cols_a_extraer].copy()
         if df.empty:
@@ -99,7 +99,7 @@ def cargar_csv_datos(archivo, tipo="inventario", diametro_por_defecto=DEFAULT_DI
             if (df[col_id] == "").any():
                 return None, f"Error en CSV de {nombre_tabla}: El identificador ({col_id}) no puede estar vacío."
 
-        # Validar columna Diametro en Inventario si viene incluida en el CSV
+        # Validar columna Diametro en Inventario o Pedidos si viene incluida en el CSV
         if tiene_col_diametro:
             df["Diametro"] = df["Diametro"].astype(str).str.strip()
             invalidos = [d for d in df["Diametro"].unique() if d not in DIAMETROS_COMERCIALES_NPS]
@@ -124,13 +124,19 @@ def cargar_csv_datos(archivo, tipo="inventario", diametro_por_defecto=DEFAULT_DI
             return None, f"Error en CSV de {nombre_tabla}: Las cantidades no admiten decimales."
         df["Cantidad"] = cantidades_num.astype(int)
 
-        # Para Inventario, se genera automáticamente la secuencia limpia R1..Rn y se asegura la columna Diametro
+        # Asegurar columna Diametro en ambos tipos (asignando por defecto 4" si un CSV antiguo no la trae)
+        df = df.reset_index(drop=True)
+        if not tiene_col_diametro:
+            df["Diametro"] = diametro_por_defecto
+            df.attrs["aviso_diametro_defecto"] = True
+        else:
+            df.attrs["aviso_diametro_defecto"] = False
+
         if es_inventario:
-            df = df.reset_index(drop=True)
-            if not tiene_col_diametro:
-                df["Diametro"] = diametro_por_defecto
             df.insert(0, "ID_Retal", [f"R{i + 1}" for i in range(len(df))])
             df = df[["ID_Retal", "Diametro", "Longitud_mm", "Cantidad"]]
+        else:
+            df = df[["ID_Pieza", "Diametro", "Longitud_mm", "Cantidad"]]
 
         return df, ""
     except Exception as e:
@@ -263,6 +269,7 @@ def validar_pedidos(df_pedidos, l_comercial, kerf):
     """
     Valida las reglas de negocio específicas del Paso 3 (Pedidos de Piezas):
     - Reglas base de integridad numérica y celdas vacías.
+    - Verifica que la columna Diametro (si está presente) no tenga celdas vacías ni valores fuera de la tabla NPS.
     - No permite IDs duplicados entre piezas activas (Cantidad > 0).
     - Bloquea piezas físicamente imposibles considerando el kerf:
       Ejemplo: con tubo de 6000 mm y kerf de 4 mm, una pieza de 5999 mm requiere
@@ -272,6 +279,16 @@ def validar_pedidos(df_pedidos, l_comercial, kerf):
     es_valido, msg = _validar_tabla_base(df_pedidos, "Pedidos", "ID_Pieza")
     if not es_valido:
         return False, msg
+
+    if not df_pedidos.empty and "Diametro" in df_pedidos.columns:
+        if df_pedidos["Diametro"].isna().any() or (df_pedidos["Diametro"].astype(str).str.strip() == "").any():
+            return False, "Error en Pedidos: Existen filas sin diámetro comercial asignado."
+        invalidos = [
+            d for d in df_pedidos["Diametro"].astype(str).str.strip().unique()
+            if d not in DIAMETROS_COMERCIALES_NPS
+        ]
+        if invalidos:
+            return False, f"Error en Pedidos: Diámetro(s) fuera de la tabla estándar NPS: {invalidos}."
 
     df_ped_val = df_pedidos[df_pedidos["Cantidad"] > 0] if not df_pedidos.empty else df_pedidos
 
