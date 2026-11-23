@@ -339,6 +339,10 @@ with tab_ped:
             st.error(msg_ped)
         else:
             try:
+                # Se ejecuta el motor de optimización DOS VECES con exactamente los mismos datos:
+                # 1) usar_orden_original=False -> Plan Optimizado (ordena piezas de mayor a menor, Best-Fit Decreasing).
+                # 2) usar_orden_original=True  -> Escenario Base (corta en el orden exacto en que se ingresaron).
+                # Comparar ambos escenarios permite cuantificar el ahorro real de tubos nuevos y descarte en mm.
                 with st.spinner("Optimizando cortes y calculando balance de material..."):
                     st.session_state.resultados = optimizar_cortes(
                         st.session_state.inventario, st.session_state.pedidos, l_comercial, kerf, umbral, usar_orden_original=False
@@ -375,6 +379,9 @@ with tab_res:
     if not bal["cuadra_perfecto"]:
         st.error("⚠️ Alerta: El balance de masas no cuadra con el material de origen.")
 
+    # Cálculo de ahorros comparando el escenario base (Orden Original) contra el Optimizado (BFD):
+    # - diff_tubos > 0    -> Tubos comerciales que se evitaron comprar gracias al ordenamiento.
+    # - diff_descarte > 0 -> Milímetros de chatarra/descarte reducidos frente al corte sin ordenar.
     st.subheader("Comparativa de Eficiencia (Optimizado vs Orden Original)")
     diff_tubos = res_orig["tubos_comprados"] - res["tubos_comprados"]
     diff_descarte = res_orig["balance"]["descarte"] - bal["descarte"]

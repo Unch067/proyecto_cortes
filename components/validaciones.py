@@ -1,11 +1,24 @@
+"""
+Módulo de validación de dominio y carga de archivos CSV - OptiCorte 1D.
+Actúa como guardia de seguridad antes de ejecutar el motor de optimización,
+protegiendo el cálculo contra datos corruptos, vacíos, negativos o físicamente imposibles.
+"""
 import io
 import pandas as pd
 
 
 def cargar_csv_datos(archivo, tipo="inventario"):
+    """
+    Lee y sanitiza archivos CSV externos de Inventario o Pedidos.
+    - Detecta automáticamente delimitadores ',' o ';' (compatible con Excel en español).
+    - Convierte decimales escritos con coma o punto en milímetros enteros (int).
+    - Para Inventario, ignora/sobrescribe cualquier ID previo y autogenera la secuencia R1..Rn.
+    Retorna (df_limpio, "") si es válido, o (None, mensaje_error_espanol) si falla.
+    """
     es_inventario = (tipo == "inventario")
     col_id = "ID_Retal" if es_inventario else "ID_Pieza"
     nombre_tabla = "Inventario" if es_inventario else "Pedidos"
+    # En Inventario solo se exigen Longitud_mm y Cantidad porque ID_Retal se autogenera (R1..Rn)
     columnas_esperadas = ["Longitud_mm", "Cantidad"] if es_inventario else [col_id, "Longitud_mm", "Cantidad"]
 
     try:
@@ -16,6 +29,7 @@ def cargar_csv_datos(archivo, tipo="inventario"):
         else:
             raw = archivo
 
+        # Intenta decodificar en UTF-8 con BOM, UTF-8 estándar o Latin-1 (común en Excel Windows)
         if isinstance(raw, bytes):
             texto = None
             for enc in ("utf-8-sig", "utf-8", "latin-1"):
@@ -33,6 +47,7 @@ def cargar_csv_datos(archivo, tipo="inventario"):
         if not lineas:
             return None, f"Error en CSV de {nombre_tabla}: El archivo está vacío."
 
+        # Detección determinista de delimitador analizando la primera línea (encabezado)
         cabecera = lineas[0]
         delimitador = ";" if cabecera.count(";") > cabecera.count(",") else ","
 
@@ -65,7 +80,7 @@ def cargar_csv_datos(archivo, tipo="inventario"):
             return None, f"Error en CSV de {nombre_tabla}: 'Longitud_mm' contiene valores no numéricos."
         df["Longitud_mm"] = longitudes_num.round().astype(int)
 
-        # Conversión de Cantidad (admite formato '2', '2.0', '2,0', rechaza decimales fraccionarios)
+        # Conversión de Cantidad (admite formato '2', '2.0', '2,0', rechaza decimales fraccionarios como '1,5')
         cantidades_str = df["Cantidad"].astype(str).str.strip().str.replace(",", ".", regex=False)
         cantidades_num = pd.to_numeric(cantidades_str, errors="coerce")
         if cantidades_num.isna().any():
@@ -74,6 +89,7 @@ def cargar_csv_datos(archivo, tipo="inventario"):
             return None, f"Error en CSV de {nombre_tabla}: Las cantidades no admiten decimales."
         df["Cantidad"] = cantidades_num.astype(int)
 
+        # Para Inventario, se genera automáticamente la secuencia limpia R1, R2, ..., Rn
         if es_inventario:
             df = df.reset_index(drop=True)
             df.insert(0, "ID_Retal", [f"R{i + 1}" for i in range(len(df))])
@@ -86,8 +102,11 @@ def cargar_csv_datos(archivo, tipo="inventario"):
 def normalizar_ids_inventario(df_editado, n_filas_base=None):
     """
     Asegura que la columna ID_Retal tenga la secuencia exacta ['R1', 'R2', ..., 'Rn']
-    sin descartar filas con Longitud_mm o Cantidad en None/NaN.
-    Retorna (df_normalizado, requiere_rerun).
+    sin descartar filas recién agregadas que aún tengan Longitud_mm o Cantidad en None/NaN.
+
+    Retorna una tupla (df_normalizado, requiere_rerun):
+    - requiere_rerun=True indica a la interfaz que debe refrescar el editor con los nuevos códigos.
+    - requiere_rerun=False evita ciclos infinitos de st.rerun() cuando los códigos ya están en orden.
     """
     df_norm = df_editado.reset_index(drop=True).copy()
     ids_esperados = [f"R{i + 1}" for i in range(len(df_norm))]
@@ -96,6 +115,7 @@ def normalizar_ids_inventario(df_editado, n_filas_base=None):
     ids_actuales = df_norm["ID_Retal"].tolist() if not df_norm.empty else []
     cambio_cantidad_filas = (n_filas_base is not None and len(df_norm) != n_filas_base)
 
+    # Si el usuario agregó/eliminó filas o algún ID llegó vacío (None/NaN), se renumera de R1 a Rn
     if cambio_cantidad_filas or tiene_nulos_id or ids_actuales != ids_esperados:
         df_norm["ID_Retal"] = ids_esperados
         return df_norm, True
@@ -104,6 +124,12 @@ def normalizar_ids_inventario(df_editado, n_filas_base=None):
 
 
 def _validar_tabla_base(df, nombre, col_id):
+    """
+    Reglas base compartidas por Inventario y Pedidos (se ejecutan ANTES de filtrar Cantidad == 0):
+    1. Bloquea celdas vacías (NaN/None) e identificadores en blanco.
+    2. Bloquea cantidades decimales (ej. 1.5 piezas) y cantidades negativas (ej. -1).
+    3. Exige longitudes en milímetros enteros estrictamente positivos (> 0).
+    """
     if df.empty:
         return True, ""
 
@@ -113,6 +139,7 @@ def _validar_tabla_base(df, nombre, col_id):
     if (df[col_id].astype(str).str.strip() == "").any():
         return False, f"Error en {nombre}: El identificador ({col_id}) no puede estar vacío."
 
+    # El operador módulo (% 1 != 0) detecta si el número tiene parte fraccionaria
     if (df["Cantidad"] % 1 != 0).any():
         return False, f"Error en {nombre}: Las cantidades no admiten decimales."
 
@@ -126,15 +153,23 @@ def _validar_tabla_base(df, nombre, col_id):
 
 
 def validar_inventario(df_inventario, l_comercial):
+    """
+    Valida las reglas de negocio específicas del Paso 2 (Inventario de Retales):
+    - Reglas base de integridad numérica y celdas vacías.
+    - No permite IDs duplicados entre retales activos (Cantidad > 0).
+    - Ningún retal puede medir más que la longitud de un tubo comercial nuevo (l_comercial).
+    """
     es_valido, msg = _validar_tabla_base(df_inventario, "Inventario", "ID_Retal")
     if not es_valido:
         return False, msg
 
+    # Se filtran filas con Cantidad > 0 (Cantidad == 0 se permite para desactivar filas sin borrarlas)
     df_inv_val = df_inventario[df_inventario["Cantidad"] > 0] if not df_inventario.empty else df_inventario
 
     if not df_inv_val.empty and df_inv_val["ID_Retal"].duplicated().any():
         return False, "IDs de retales duplicados."
 
+    # Regla física de almacén: un retal sobrante nunca puede ser más largo que el tubo nuevo original
     if not df_inv_val.empty and (df_inv_val["Longitud_mm"] > l_comercial).any():
         return False, "Existen retales mayores al tubo nuevo."
 
@@ -142,6 +177,15 @@ def validar_inventario(df_inventario, l_comercial):
 
 
 def validar_pedidos(df_pedidos, l_comercial, kerf):
+    """
+    Valida las reglas de negocio específicas del Paso 3 (Pedidos de Piezas):
+    - Reglas base de integridad numérica y celdas vacías.
+    - No permite IDs duplicados entre piezas activas (Cantidad > 0).
+    - Bloquea piezas físicamente imposibles considerando el kerf:
+      Ejemplo: con tubo de 6000 mm y kerf de 4 mm, una pieza de 5999 mm requiere
+      5999 + 4 = 6003 mm (> 6000 mm), por lo que es imposible de cortar.
+      Solo se admiten piezas con Longitud == l_comercial (sin corte) o Longitud + kerf <= l_comercial.
+    """
     es_valido, msg = _validar_tabla_base(df_pedidos, "Pedidos", "ID_Pieza")
     if not es_valido:
         return False, msg
@@ -152,6 +196,7 @@ def validar_pedidos(df_pedidos, l_comercial, kerf):
         return False, "IDs de piezas duplicados."
 
     if not df_ped_val.empty:
+        # Condición de viabilidad física: o encaja exacta sin corte (== l_comercial), o cabe con kerf (<= l_comercial)
         imposibles = df_ped_val[
             ~((df_ped_val["Longitud_mm"] == l_comercial) |
               (df_ped_val["Longitud_mm"] + kerf <= l_comercial))
@@ -163,6 +208,9 @@ def validar_pedidos(df_pedidos, l_comercial, kerf):
 
 
 def validar_datos_entrada(df_inventario, df_pedidos, l_comercial, kerf):
+    """
+    Validador integral que ejecuta secuencialmente validar_inventario y validar_pedidos.
+    """
     inv_ok, msg_inv = validar_inventario(df_inventario, l_comercial)
     if not inv_ok:
         return False, msg_inv
