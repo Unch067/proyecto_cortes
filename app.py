@@ -147,8 +147,10 @@ if "kerf" not in st.session_state:
     st.session_state.kerf = DEFAULT_KERF
 if "umbral" not in st.session_state:
     st.session_state.umbral = DEFAULT_UMBRAL
-if "paso_actual" not in st.session_state:
-    st.session_state.paso_actual = PASOS[0]
+if "paso_activo" not in st.session_state:
+    st.session_state.paso_activo = PASOS[0]
+if "ver_nav" not in st.session_state:
+    st.session_state.ver_nav = 0
 if "paso_completado" not in st.session_state:
     st.session_state.paso_completado = 0
 if "conf_confirmada" not in st.session_state:
@@ -188,15 +190,26 @@ st.progress(progreso, text=texto_progreso)
 # ==========================================
 # 2. NAVEGACIÓN CONTROLADA POR ESTADO (PASOS)
 # ==========================================
-st.radio(
+def navegar_a(nuevo_paso):
+    st.session_state.paso_activo = nuevo_paso
+    st.session_state.ver_nav += 1
+    st.rerun()
+
+
+seleccion_nav = st.radio(
     "Navegación por pasos",
     options=PASOS,
+    index=PASOS.index(st.session_state.paso_activo),
     horizontal=True,
     label_visibility="collapsed",
-    key="paso_actual"
+    key=f"nav_pasos_radio_{st.session_state.ver_nav}"
 )
 
-paso_actual = st.session_state.paso_actual
+if seleccion_nav != st.session_state.paso_activo:
+    st.session_state.paso_activo = seleccion_nav
+    st.rerun()
+
+paso_actual = st.session_state.paso_activo
 idx_paso_actual = PASOS.index(paso_actual)
 
 # Bloqueo hacia adelante si el usuario intenta saltar a un paso no desbloqueado
@@ -204,8 +217,7 @@ if idx_paso_actual > st.session_state.paso_completado:
     paso_requerido = PASOS[st.session_state.paso_completado]
     st.warning(f"🔒 Paso bloqueado: primero debes validar y confirmar **{paso_requerido}**.")
     if st.button(f"↩️ Ir a {paso_requerido}", type="primary"):
-        st.session_state.paso_actual = paso_requerido
-        st.rerun()
+        navegar_a(paso_requerido)
     st.stop()
 
 # Recuperar parámetros globales persistidos
@@ -257,8 +269,7 @@ if paso_actual == PASOS[0]:
     if st.button("✅ Confirmar Configuración y pasar a Inventario", type="primary", use_container_width=True):
         st.session_state.conf_confirmada = conf_actual
         st.session_state.paso_completado = max(st.session_state.paso_completado, 1)
-        st.session_state.paso_actual = PASOS[1]
-        st.rerun()
+        navegar_a(PASOS[1])
 
 # ==========================================
 # PASO 2: INVENTARIO
@@ -338,8 +349,7 @@ elif paso_actual == PASOS[1]:
 
     col_prev_inv, col_next_inv = st.columns([1, 3])
     if col_prev_inv.button("⬅️ Paso Anterior", key="btn_prev_inv", use_container_width=True):
-        st.session_state.paso_actual = PASOS[0]
-        st.rerun()
+        navegar_a(PASOS[0])
 
     if col_next_inv.button("✅ Validar y Confirmar Inventario", type="primary", use_container_width=True):
         inv_ok, msg_inv = validar_inventario(st.session_state.inventario, l_comercial)
@@ -349,8 +359,7 @@ elif paso_actual == PASOS[1]:
         else:
             st.session_state.inv_confirmado_df = st.session_state.inventario.copy()
             st.session_state.paso_completado = max(st.session_state.paso_completado, 2)
-            st.session_state.paso_actual = PASOS[2]
-            st.rerun()
+            navegar_a(PASOS[2])
 
 # ==========================================
 # PASO 3: PEDIDOS
@@ -413,8 +422,7 @@ elif paso_actual == PASOS[2]:
 
     col_prev_ped, col_next_ped = st.columns([1, 3])
     if col_prev_ped.button("⬅️ Paso Anterior", key="btn_prev_ped", use_container_width=True):
-        st.session_state.paso_actual = PASOS[1]
-        st.rerun()
+        navegar_a(PASOS[1])
 
     if col_next_ped.button("🚀 Validar y Calcular Optimización", type="primary", use_container_width=True):
         ped_ok, msg_ped = validar_pedidos(st.session_state.pedidos, l_comercial, kerf)
@@ -448,8 +456,7 @@ elif paso_actual == PASOS[2]:
                     )
                 st.session_state.ped_confirmado_df = st.session_state.pedidos.copy()
                 st.session_state.paso_completado = 3
-                st.session_state.paso_actual = PASOS[3]
-                st.rerun()
+                navegar_a(PASOS[3])
             except Exception as e:
                 st.error(f"⚠️ Ocurrió un error inesperado en el motor de optimización: {str(e)}")
 
@@ -462,8 +469,7 @@ elif paso_actual == PASOS[3]:
         st.stop()
 
     if st.button("⬅️ Paso Anterior (Modificar Pedidos)", key="btn_prev_res"):
-        st.session_state.paso_actual = PASOS[2]
-        st.rerun()
+        navegar_a(PASOS[2])
 
     res = st.session_state.resultados
     bal = res["balance"]
