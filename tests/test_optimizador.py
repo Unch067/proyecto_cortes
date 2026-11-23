@@ -504,6 +504,14 @@ class TestOptimizadorCortes(unittest.TestCase):
         self.assertAlmostEqual(radios_z[0], 30.15, places=1)
         self.assertAlmostEqual(radios_z[1], 84.15, places=1)
 
+        # Simulador 2D asigna mayor width a un tubo de 6" que a uno de 2" y fija el eje Y en [-0.6, 0.6]
+        fila_2 = next(f for f in res["detalle_csv"] if f["Diametro"] == diam_2)
+        fila_6 = next(f for f in res["detalle_csv"] if f["Diametro"] == diam_6)
+        fig_sim_2 = crear_simulacion_paso_a_paso(fila_2, fila_2["Longitud_Inicial"], kerf_nominal=self.kerf)
+        fig_sim_6 = crear_simulacion_paso_a_paso(fila_6, fila_6["Longitud_Inicial"], kerf_nominal=self.kerf)
+        self.assertGreater(fig_sim_6.data[0].width, fig_sim_2.data[0].width)
+        self.assertEqual(tuple(fig_sim_6.layout.yaxis.range), (-0.6, 0.6))
+
 
 if __name__ == "__main__":
     unittest.main()

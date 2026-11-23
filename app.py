@@ -521,12 +521,16 @@ with tab_res:
         st.subheader("⚙️ Simulador de Taller: Avance de Corte")
         st.write("Selecciona una barra y desplaza el carro de la sierra para simular el proceso físico de seccionamiento:")
 
-        lista_origenes = [f["Origen_ID"] for f in detalle_visible]
+        opciones_barras = {
+            f"{f['Origen_ID']} — {f.get('Diametro', DEFAULT_DIAMETRO_ETIQUETA)} ({f['Longitud_Inicial']} mm)": f
+            for f in detalle_visible
+        }
         col_sel_barra, col_slider = st.columns([1, 3])
 
         with col_sel_barra:
-            barra_sel_id = st.selectbox("Barra a simular:", lista_origenes, key="sel_sim_barra")
-            fila_sel = next((f for f in detalle_visible if f["Origen_ID"] == barra_sel_id), detalle_visible[0])
+            etiqueta_sel = st.selectbox("Barra a simular:", list(opciones_barras.keys()), key="sel_sim_barra")
+            fila_sel = opciones_barras[etiqueta_sel]
+            barra_sel_id = fila_sel["Origen_ID"]
             st.caption(f"**Diámetro:** {fila_sel.get('Diametro', DEFAULT_DIAMETRO_ETIQUETA)}")
             st.caption(f"**Longitud inicial:** {fila_sel['Longitud_Inicial']} mm")
             st.caption(f"**Piezas a extraer:** {fila_sel['Piezas_Asignadas']}")

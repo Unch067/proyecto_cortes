@@ -77,13 +77,18 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=114.3, diam
 
     y_actual = 0.0
     radio_anterior = None
+    radio_max = 0.0
 
     for idx, fila in enumerate(detalle_csv):
         origen_id = fila["Origen_ID"]
         diam_fila = max(15.0, float(fila.get("Diametro_mm", diametro_mm)))
         etiqueta_fila = fila.get("Diametro") or diametro_etiqueta or f"{diam_fila:.1f} mm"
+        diam_corto = etiqueta_fila.split(" (")[0]
+        base_id = origen_id.split(" [")[0]
+        etiqueta_y = f"{base_id} ({diam_corto})"
 
         radio_ext = diam_fila / 2.0
+        radio_max = max(radio_max, radio_ext)
         radio_int = radio_ext * 0.72  # Espesor de pared visible (28% del radio)
         radio_ext_kerf = radio_ext * 1.18
         radio_int_kerf = radio_int * 0.92
@@ -97,7 +102,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=114.3, diam
         y_actual = y_pos
         radio_anterior = radio_ext
 
-        nombres_eje_y.append(origen_id)
+        nombres_eje_y.append(etiqueta_y)
         posiciones_eje_y.append(y_pos)
 
         x_actual = 0
@@ -165,6 +170,14 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=114.3, diam
                 opacity=0.9
             ))
 
+    # Aspect ratio dinámico para mantener la sección circular real en Y-Z sin aplastar cilindros
+    n_tubos = max(1, len(detalle_csv))
+    span_y = max(radio_max * 2.4, y_actual + radio_max * 2.4)
+    span_z = max(radio_max * 2.4, 1.0)
+    aspect_z = 0.45
+    aspect_y = max(0.45, min(2.4, aspect_z * (span_y / span_z)))
+    aspect_x = max(3.4, min(4.6, 3.8 + 0.1 * (n_tubos - 1)))
+
     # Ajuste de escala visual (evita que 6000 mm deforme la ventana)
     fig.update_layout(
         scene=dict(
@@ -197,7 +210,7 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=114.3, diam
                 up=dict(x=0, y=0, z=1)
             ),
             aspectmode="manual",
-            aspectratio=dict(x=3.8, y=1.2, z=0.4)
+            aspectratio=dict(x=aspect_x, y=aspect_y, z=aspect_z)
         ),
         margin=dict(l=0, r=0, b=10, t=10),
         height=450,
@@ -371,18 +384,30 @@ def crear_grafico_comparativo_dual(res, res_orig):
 def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4):
     """
     Renderiza la simulación dinámica de una barra específica en función
-    de la cota de avance de la sierra.
+    de la cota de avance de la sierra, escalando visualmente el grosor
+    de la barra según su diámetro exterior real (Diametro_mm).
     """
     longitud_total = fila_detalle["Longitud_Inicial"]
     origen_id = fila_detalle["Origen_ID"]
     espesor_kerf = kerf_nominal if kerf_nominal > 0 else 0
-    
+
+    diametro_mm = float(fila_detalle.get("Diametro_mm", 114.3))
+    diametro_etq = fila_detalle.get("Diametro") or f"{diametro_mm:.1f} mm"
+    diam_corto = diametro_etq.split(" (")[0]
+    etiqueta_y = origen_id if "[" in origen_id else f"{origen_id} [{diam_corto}]"
+
+    # Mapeo lineal del rango comercial NPS (21.3 mm a 609.6 mm) al grosor visual [0.22, 0.85]
+    factor_diam = max(0.0, min(1.0, (diametro_mm - 21.3) / (609.6 - 21.3)))
+    grosor_barra = round(0.22 + factor_diam * (0.85 - 0.22), 3)
+    mitad_disco = min(0.56, grosor_barra / 2.0 + 0.08)
+
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
-        y=[origen_id],
+        y=[etiqueta_y],
         x=[longitud_total],
         base=0,
+        width=grosor_barra,
         orientation='h',
         marker_color='#334155',
         name='Material Pendiente',
@@ -401,9 +426,10 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
 
             if fin_pieza <= cota_corte_actual:
                 fig.add_trace(go.Bar(
-                    y=[origen_id],
+                    y=[etiqueta_y],
                     x=[largo],
                     base=x_cursor,
+                    width=grosor_barra,
                     orientation='h',
                     marker_color='#0284C7',
                     text=f"✂️ {nombre} ({largo} mm)",
@@ -411,14 +437,19 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
                     textfont=dict(color='white', size=11),
                     name='Pieza Cortada',
                     showlegend=False,
-                    hovertemplate=f"<b>Pieza:</b> {nombre}<br><b>Longitud:</b> {largo} mm<extra></extra>"
+                    hovertemplate=(
+                        f"<b>Pieza:</b> {nombre}<br>"
+                        f"<b>Diámetro:</b> {diametro_etq}<br>"
+                        f"<b>Longitud:</b> {largo} mm<extra></extra>"
+                    )
                 ))
             elif x_cursor < cota_corte_actual < fin_pieza:
                 avance_parcial = cota_corte_actual - x_cursor
                 fig.add_trace(go.Bar(
-                    y=[origen_id],
+                    y=[etiqueta_y],
                     x=[avance_parcial],
                     base=x_cursor,
+                    width=grosor_barra,
                     orientation='h',
                     marker_color='#38BDF8',
                     text=f"Cortando... {avance_parcial} mm",
@@ -426,7 +457,11 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
                     textfont=dict(color='black', size=10),
                     name='En Corte',
                     showlegend=False,
-                    hovertemplate=f"<b>Procesando:</b> {nombre}<br><b>Avance:</b> {avance_parcial}/{largo} mm<extra></extra>"
+                    hovertemplate=(
+                        f"<b>Procesando:</b> {nombre}<br>"
+                        f"<b>Diámetro:</b> {diametro_etq}<br>"
+                        f"<b>Avance:</b> {avance_parcial}/{largo} mm<extra></extra>"
+                    )
                 ))
 
             x_cursor = fin_pieza
@@ -434,9 +469,10 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
             if x_cursor < longitud_total and espesor_kerf > 0:
                 if x_cursor + espesor_kerf <= cota_corte_actual:
                     fig.add_trace(go.Bar(
-                        y=[origen_id],
+                        y=[etiqueta_y],
                         x=[espesor_kerf],
                         base=x_cursor,
+                        width=grosor_barra,
                         orientation='h',
                         marker_color='#EF4444',
                         name='Kerf',
@@ -454,9 +490,10 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
             else f"{fila_detalle['Clasificacion']} ({sobrante_val} mm)"
         )
         fig.add_trace(go.Bar(
-            y=[origen_id],
+            y=[etiqueta_y],
             x=[sobrante_val],
             base=longitud_total - sobrante_val,
+            width=grosor_barra,
             orientation='h',
             marker_color=color_sob,
             text=texto_sob,
@@ -464,13 +501,16 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
             textfont=dict(color='black' if fila_detalle["Clasificacion"] == "Retal Reutilizable" else 'white', size=11),
             name='Sobrante',
             showlegend=False,
-            hovertemplate=f"<b>{fila_detalle['Clasificacion']}:</b> {sobrante_val} mm<extra></extra>"
+            hovertemplate=(
+                f"<b>{fila_detalle['Clasificacion']}:</b> {sobrante_val} mm<br>"
+                f"<b>Diámetro:</b> {diametro_etq}<extra></extra>"
+            )
         ))
 
     fig.add_shape(
         type="line",
         x0=cota_corte_actual, x1=cota_corte_actual,
-        y0=-0.4, y1=0.4,
+        y0=-mitad_disco, y1=mitad_disco,
         line=dict(color="#F43F5E", width=3, dash="dot")
     )
 
@@ -483,7 +523,12 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
             gridcolor='#1E293B',
             color='#94A3B8'
         ),
-        yaxis=dict(showticklabels=True, showgrid=False, color='#F8FAFC'),
+        yaxis=dict(
+            range=[-0.6, 0.6],
+            showticklabels=True,
+            showgrid=False,
+            color='#F8FAFC'
+        ),
         height=200,
         margin=dict(l=10, r=10, b=30, t=10),
         paper_bgcolor='rgba(0,0,0,0)',
