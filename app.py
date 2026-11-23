@@ -196,6 +196,55 @@ def navegar_a(nuevo_paso):
     st.rerun()
 
 
+def cargar_demo_multi_diametro():
+    diam_2 = '2" (Ø ext. 60.3 mm)'
+    diam_4 = '4" (Ø ext. 114.3 mm)'
+    diam_6 = '6" (Ø ext. 168.3 mm)'
+    diam_8 = '8" (Ø ext. 219.1 mm)'
+
+    df_inv_demo = pd.DataFrame([
+        {"ID_Retal": "R1", "Diametro": diam_2, "Longitud_mm": 3000, "Cantidad": 1},
+        {"ID_Retal": "R2", "Diametro": diam_4, "Longitud_mm": 3000, "Cantidad": 1},
+        {"ID_Retal": "R3", "Diametro": diam_6, "Longitud_mm": 4000, "Cantidad": 1},
+        {"ID_Retal": "R4", "Diametro": diam_8, "Longitud_mm": 2500, "Cantidad": 1},
+    ])
+    df_ped_demo = pd.DataFrame([
+        {"ID_Pieza": "P2_A", "Diametro": diam_2, "Longitud_mm": 2600, "Cantidad": 1},
+        {"ID_Pieza": "P2_B", "Diametro": diam_2, "Longitud_mm": 1800, "Cantidad": 2},
+        {"ID_Pieza": "P4_A", "Diametro": diam_4, "Longitud_mm": 2900, "Cantidad": 1},
+        {"ID_Pieza": "P4_B", "Diametro": diam_4, "Longitud_mm": 2000, "Cantidad": 1},
+        {"ID_Pieza": "P4_C", "Diametro": diam_4, "Longitud_mm": 1900, "Cantidad": 1},
+        {"ID_Pieza": "P4_D", "Diametro": diam_4, "Longitud_mm": 1800, "Cantidad": 1},
+        {"ID_Pieza": "P6_A", "Diametro": diam_6, "Longitud_mm": 3500, "Cantidad": 1},
+        {"ID_Pieza": "P6_B", "Diametro": diam_6, "Longitud_mm": 2200, "Cantidad": 2},
+    ])
+
+    st.session_state.inventario_base = df_inv_demo
+    st.session_state.inventario = df_inv_demo.copy()
+    st.session_state.pedidos_base = df_ped_demo
+    st.session_state.pedidos = df_ped_demo.copy()
+    st.session_state.ver_editor_inv += 1
+    st.session_state.ver_editor_ped += 1
+    st.session_state.inv_confirmado_df = None
+    st.session_state.ped_confirmado_df = None
+    st.session_state.resultados = None
+    st.session_state.res_original = None
+    st.session_state.paso_completado = min(st.session_state.paso_completado, 1)
+    st.rerun()
+
+
+PLANTILLA_INV_CSV = (
+    'Diametro,Longitud_mm,Cantidad\n'
+    '"2"" (Ø ext. 60.3 mm)",3000,1\n'
+    '"4"" (Ø ext. 114.3 mm)",2500,2\n'
+)
+PLANTILLA_PED_CSV = (
+    'ID_Pieza,Diametro,Longitud_mm,Cantidad\n'
+    'P1,"2"" (Ø ext. 60.3 mm)",2400,2\n'
+    'P2,"4"" (Ø ext. 114.3 mm)",2900,1\n'
+)
+
+
 seleccion_nav = st.radio(
     "Navegación por pasos",
     options=PASOS,
@@ -275,12 +324,27 @@ if paso_actual == PASOS[0]:
 # PASO 2: INVENTARIO
 # ==========================================
 elif paso_actual == PASOS[1]:
-    st.subheader("Paso 2: Retales Disponibles en Obra")
-    archivo_inv = st.file_uploader(
+    col_tit_inv, col_demo_inv = st.columns([3, 1.4])
+    col_tit_inv.subheader("Paso 2: Retales Disponibles en Obra")
+    if col_demo_inv.button("🧪 Cargar Caso Demo Multi-Diámetro", key="btn_demo_inv", use_container_width=True):
+        cargar_demo_multi_diametro()
+
+    col_up_inv, col_tpl_inv = st.columns([4, 1])
+    archivo_inv = col_up_inv.file_uploader(
         "📂 Cargar retales desde CSV (columnas: Diametro, Longitud_mm, Cantidad · ID_Retal se genera automáticamente · delimitador ',' o ';')",
         type=["csv"],
         key="uploader_inv"
     )
+    with col_tpl_inv:
+        st.write("")
+        st.write("")
+        st.download_button(
+            "📥 Plantilla CSV",
+            data=PLANTILLA_INV_CSV.encode("utf-8"),
+            file_name="plantilla_inventario.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
     if archivo_inv is not None:
         firma_inv = (archivo_inv.name, archivo_inv.size)
         if firma_inv != st.session_state.csv_inv_firma:
@@ -365,12 +429,40 @@ elif paso_actual == PASOS[1]:
 # PASO 3: PEDIDOS
 # ==========================================
 elif paso_actual == PASOS[2]:
-    st.subheader("Paso 3: Piezas Requeridas")
-    archivo_ped = st.file_uploader(
+    col_tit_ped, col_demo_ped = st.columns([3, 1.4])
+    col_tit_ped.subheader("Paso 3: Piezas Requeridas")
+    if col_demo_ped.button("🧪 Cargar Caso Demo Multi-Diámetro", key="btn_demo_ped", use_container_width=True):
+        cargar_demo_multi_diametro()
+
+    col_up_ped, col_tpl_ped = st.columns([4, 1])
+    archivo_ped = col_up_ped.file_uploader(
         "📂 Cargar pedidos desde CSV (columnas: ID_Pieza, Diametro, Longitud_mm, Cantidad · delimitador ',' o ';')",
         type=["csv"],
         key="uploader_ped"
     )
+    with col_tpl_ped:
+        st.write("")
+        st.write("")
+        st.download_button(
+            "📥 Plantilla CSV",
+            data=PLANTILLA_PED_CSV.encode("utf-8"),
+            file_name="plantilla_pedidos.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    with st.expander("🧮 Conversor rápido de unidades a mm", expanded=False):
+        c_val, c_uni, c_res = st.columns([1.2, 1.4, 1.4])
+        valor_conv = c_val.number_input("Valor a convertir", min_value=0.0, value=2.5, step=0.1, key="conv_val")
+        unidad_conv = c_uni.selectbox(
+            "Unidad origen",
+            options=["Metros (m)", "Centímetros (cm)", "Pulgadas (in)"],
+            index=0,
+            key="conv_uni"
+        )
+        factores_mm = {"Metros (m)": 1000.0, "Centímetros (cm)": 10.0, "Pulgadas (in)": 25.4}
+        mm_equivalente = int(round(valor_conv * factores_mm[unidad_conv]))
+        c_res.metric("Equivalente en milímetros", f"{mm_equivalente} mm")
     if archivo_ped is not None:
         firma_ped = (archivo_ped.name, archivo_ped.size)
         if firma_ped != st.session_state.csv_ped_firma:
