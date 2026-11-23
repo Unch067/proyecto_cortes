@@ -22,5 +22,11 @@ if __name__ == "__main__":
         ruta_app,
         "--global.developmentMode=false",
         "--server.headless=false",
+        "--client.toolbarMode=minimal",
+        "--theme.base=dark",
+        "--theme.primaryColor=#FF4B4B",
+        "--theme.backgroundColor=#0E1117",
+        "--theme.secondaryBackgroundColor=#1E293B",
+        "--theme.textColor=#F8FAFC",
     ]
     sys.exit(stcli.main())

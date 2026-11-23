@@ -3,9 +3,10 @@ import pandas as pd
 
 
 def cargar_csv_datos(archivo, tipo="inventario"):
-    col_id = "ID_Retal" if tipo == "inventario" else "ID_Pieza"
-    nombre_tabla = "Inventario" if tipo == "inventario" else "Pedidos"
-    columnas_esperadas = [col_id, "Longitud_mm", "Cantidad"]
+    es_inventario = (tipo == "inventario")
+    col_id = "ID_Retal" if es_inventario else "ID_Pieza"
+    nombre_tabla = "Inventario" if es_inventario else "Pedidos"
+    columnas_esperadas = ["Longitud_mm", "Cantidad"] if es_inventario else [col_id, "Longitud_mm", "Cantidad"]
 
     try:
         if hasattr(archivo, "getvalue"):
@@ -52,9 +53,10 @@ def cargar_csv_datos(archivo, tipo="inventario"):
         if df.isna().any().any():
             return None, f"Error en CSV de {nombre_tabla}: Existen celdas vacías en el archivo."
 
-        df[col_id] = df[col_id].astype(str).str.strip()
-        if (df[col_id] == "").any():
-            return None, f"Error en CSV de {nombre_tabla}: El identificador ({col_id}) no puede estar vacío."
+        if not es_inventario:
+            df[col_id] = df[col_id].astype(str).str.strip()
+            if (df[col_id] == "").any():
+                return None, f"Error en CSV de {nombre_tabla}: El identificador ({col_id}) no puede estar vacío."
 
         # Conversión de Longitud_mm (admite decimales con coma o punto y convierte a int mm)
         longitudes_str = df["Longitud_mm"].astype(str).str.strip().str.replace(",", ".", regex=False)
@@ -72,48 +74,62 @@ def cargar_csv_datos(archivo, tipo="inventario"):
             return None, f"Error en CSV de {nombre_tabla}: Las cantidades no admiten decimales."
         df["Cantidad"] = cantidades_num.astype(int)
 
+        if es_inventario:
+            df = df.reset_index(drop=True)
+            df.insert(0, "ID_Retal", [f"R{i + 1}" for i in range(len(df))])
+
         return df, ""
     except Exception as e:
         return None, f"Error al procesar el archivo CSV de {nombre_tabla}: {str(e)}"
 
 
-def validar_datos_entrada(df_inventario, df_pedidos, l_comercial, kerf):
-    # 1. Validar celdas vacías, decimales y negativos ANTES de filtrar
-    for nombre, col_id, df in [
-        ("Inventario", "ID_Retal", df_inventario),
-        ("Pedidos", "ID_Pieza", df_pedidos)
-    ]:
-        if df.empty:
-            continue
+def _validar_tabla_base(df, nombre, col_id):
+    if df.empty:
+        return True, ""
 
-        if df[[col_id, "Longitud_mm", "Cantidad"]].isna().any().any():
-            return False, f"Error en {nombre}: Existen celdas vacías o sin completar."
+    if df[[col_id, "Longitud_mm", "Cantidad"]].isna().any().any():
+        return False, f"Error en {nombre}: Existen celdas vacías o sin completar."
 
-        if (df[col_id].astype(str).str.strip() == "").any():
-            return False, f"Error en {nombre}: El identificador ({col_id}) no puede estar vacío."
+    if (df[col_id].astype(str).str.strip() == "").any():
+        return False, f"Error en {nombre}: El identificador ({col_id}) no puede estar vacío."
 
-        if (df["Cantidad"] % 1 != 0).any():
-            return False, f"Error en {nombre}: Las cantidades no admiten decimales."
+    if (df["Cantidad"] % 1 != 0).any():
+        return False, f"Error en {nombre}: Las cantidades no admiten decimales."
 
-        if (df["Cantidad"] < 0).any():
-            return False, f"Error en {nombre}: Las cantidades no pueden ser negativas."
+    if (df["Cantidad"] < 0).any():
+        return False, f"Error en {nombre}: Las cantidades no pueden ser negativas."
 
-        if (df["Longitud_mm"] % 1 != 0).any() or (df["Longitud_mm"] <= 0).any():
-            return False, f"Error en {nombre}: Las longitudes deben ser números enteros positivos."
+    if (df["Longitud_mm"] % 1 != 0).any() or (df["Longitud_mm"] <= 0).any():
+        return False, f"Error en {nombre}: Las longitudes deben ser números enteros positivos."
 
-    # 2. Filtrar cantidades 0
+    return True, ""
+
+
+def validar_inventario(df_inventario, l_comercial):
+    es_valido, msg = _validar_tabla_base(df_inventario, "Inventario", "ID_Retal")
+    if not es_valido:
+        return False, msg
+
     df_inv_val = df_inventario[df_inventario["Cantidad"] > 0] if not df_inventario.empty else df_inventario
-    df_ped_val = df_pedidos[df_pedidos["Cantidad"] > 0] if not df_pedidos.empty else df_pedidos
 
-    # 3. Validar duplicados
     if not df_inv_val.empty and df_inv_val["ID_Retal"].duplicated().any():
         return False, "IDs de retales duplicados."
-    if not df_ped_val.empty and df_ped_val["ID_Pieza"].duplicated().any():
-        return False, "IDs de piezas duplicados."
 
-    # 4. Validar viabilidad física y kerf
     if not df_inv_val.empty and (df_inv_val["Longitud_mm"] > l_comercial).any():
         return False, "Existen retales mayores al tubo nuevo."
+
+    return True, ""
+
+
+def validar_pedidos(df_pedidos, l_comercial, kerf):
+    es_valido, msg = _validar_tabla_base(df_pedidos, "Pedidos", "ID_Pieza")
+    if not es_valido:
+        return False, msg
+
+    df_ped_val = df_pedidos[df_pedidos["Cantidad"] > 0] if not df_pedidos.empty else df_pedidos
+
+    if not df_ped_val.empty and df_ped_val["ID_Pieza"].duplicated().any():
+        return False, "IDs de piezas duplicados."
 
     if not df_ped_val.empty:
         imposibles = df_ped_val[
@@ -122,5 +138,17 @@ def validar_datos_entrada(df_inventario, df_pedidos, l_comercial, kerf):
         ]
         if not imposibles.empty:
             return False, f"Piezas imposibles de cortar considerando kerf: {imposibles['ID_Pieza'].tolist()}"
+
+    return True, ""
+
+
+def validar_datos_entrada(df_inventario, df_pedidos, l_comercial, kerf):
+    inv_ok, msg_inv = validar_inventario(df_inventario, l_comercial)
+    if not inv_ok:
+        return False, msg_inv
+
+    ped_ok, msg_ped = validar_pedidos(df_pedidos, l_comercial, kerf)
+    if not ped_ok:
+        return False, msg_ped
 
     return True, ""

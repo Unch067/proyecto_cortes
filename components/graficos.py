@@ -1,3 +1,4 @@
+import math
 try:
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -6,48 +7,76 @@ except ModuleNotFoundError:
     make_subplots = None
 
 
-def _crear_cubo_malla(x0, x1, y_centro, ancho_y, alto_z, color, hover_text, opacity=1.0):
+def _crear_cilindro_hueco_malla(
+    x0, x1, y_centro, radio_ext, radio_int, color, hover_text, opacity=1.0, segmentos=24
+):
     """
-    Construye un prisma rectangular 3D paramétrico mediante triangulación estándar (Mesh3d).
-    8 vértices y 12 triángulos orientados.
+    Construye un tubo cilíndrico hueco 3D paramétrico mediante triangulación (Mesh3d):
+    pared cilíndrica exterior, perforación cilíndrica interior y tapas anulares en ambos extremos.
     """
-    y0 = y_centro - ancho_y / 2
-    y1 = y_centro + ancho_y / 2
-    z0 = -alto_z / 2
-    z1 = alto_z / 2
+    n = max(8, int(segmentos))
+    vx, vy, vz = [], [], []
 
-    # 8 Vértices del prisma
-    vx = [x0, x1, x1, x0, x0, x1, x1, x0]
-    vy = [y0, y0, y1, y1, y0, y0, y1, y1]
-    vz = [z0, z0, z0, z0, z1, z1, z1, z1]
+    # 4 anillos de n vértices:
+    # 0: exterior x0 | 1: exterior x1 | 2: interior x0 | 3: interior x1
+    for anillo_x, r in ((x0, radio_ext), (x1, radio_ext), (x0, radio_int), (x1, radio_int)):
+        for s in range(n):
+            theta = 2.0 * math.pi * s / n
+            vx.append(anillo_x)
+            vy.append(y_centro + r * math.cos(theta))
+            vz.append(r * math.sin(theta))
 
-    # 12 Triángulos que forman las 6 caras del paralelepípedo
-    i = [7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2]
-    j = [3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3]
-    k = [0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6]
+    i_idx, j_idx, k_idx = [], [], []
+    o0, o1, i0, i1 = 0, n, 2 * n, 3 * n
+
+    for s in range(n):
+        sn = (s + 1) % n
+
+        # 1. Pared cilíndrica exterior
+        i_idx.extend([o0 + s, o0 + s])
+        j_idx.extend([o0 + sn, o1 + sn])
+        k_idx.extend([o1 + sn, o1 + s])
+
+        # 2. Perforación cilíndrica interior (orientación invertida)
+        i_idx.extend([i0 + s, i0 + s])
+        j_idx.extend([i1 + sn, i1 + s])
+        k_idx.extend([i0 + sn, i1 + sn])
+
+        # 3. Tapa anular en x0
+        i_idx.extend([o0 + s, o0 + s])
+        j_idx.extend([i0 + s, i0 + sn])
+        k_idx.extend([i0 + sn, o0 + sn])
+
+        # 4. Tapa anular en x1
+        i_idx.extend([o1 + s, o1 + s])
+        j_idx.extend([o1 + sn, i1 + sn])
+        k_idx.extend([i1 + sn, i1 + s])
 
     return go.Mesh3d(
         x=vx, y=vy, z=vz,
-        i=i, j=j, k=k,
+        i=i_idx, j=j_idx, k=k_idx,
         color=color,
         opacity=opacity,
-        lighting=dict(ambient=0.6, diffuse=0.8, roughness=0.5, specular=0.4),
+        lighting=dict(ambient=0.55, diffuse=0.85, roughness=0.45, specular=0.5),
         hoverinfo="text",
         text=hover_text,
         showlegend=False
     )
 
 
-def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
+def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4, diametro_mm=100):
     """
-    Genera el entorno 3D interactivo con relación de aspecto calibrada
-    para evitar el efecto de alargamiento excesivo y solapamiento de etiquetas.
+    Genera el entorno 3D interactivo con tubos cilíndricos huecos escalados
+    según el diámetro configurado y relación de aspecto calibrada.
     """
     fig = go.Figure()
-    
-    ancho_tubo = 100.0
-    alto_tubo = 100.0
-    paso_y = 280.0  # Más separación física en Y para que no se pisen las etiquetas
+
+    diam = max(15.0, float(diametro_mm))
+    radio_ext = diam / 2.0
+    radio_int = radio_ext * 0.72  # Espesor de pared visible (28% del radio)
+    radio_ext_kerf = radio_ext * 1.18
+    radio_int_kerf = radio_int * 0.92
+    paso_y = max(240.0, diam * 2.8)  # Separación física proporcional al diámetro
 
     nombres_eje_y = []
     posiciones_eje_y = []
@@ -66,41 +95,42 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
                 nombre, largo_str = p.rsplit("(", 1)
                 largo = int(largo_str.replace(")", ""))
 
-                # 1. Prisma 3D: Pieza Útil
+                # 1. Cilindro hueco 3D: Pieza Útil
                 hover_pieza = (
                     f"<b>Bancada:</b> {origen_id}<br>"
                     f"<b>Pieza:</b> {nombre}<br>"
                     f"<b>Longitud:</b> {largo} mm<br>"
+                    f"<b>Diámetro:</b> {int(diam)} mm<br>"
                     f"<b>Tramo:</b> [{x_actual} - {x_actual + largo} mm]"
                 )
-                fig.add_trace(_crear_cubo_malla(
+                fig.add_trace(_crear_cilindro_hueco_malla(
                     x0=x_actual,
                     x1=x_actual + largo,
                     y_centro=y_pos,
-                    ancho_y=ancho_tubo,
-                    alto_z=alto_tubo,
+                    radio_ext=radio_ext,
+                    radio_int=radio_int,
                     color="#1E88E5",
                     hover_text=hover_pieza
                 ))
                 x_actual += largo
 
-                # 2. Prisma 3D: Kerf
+                # 2. Anillo 3D: Kerf (Corte de disco)
                 es_ultimo = (p_idx == len(piezas_str) - 1) and (fila["Sobrante_mm"] == 0)
                 if not es_ultimo and (x_actual < fila["Longitud_Inicial"]):
                     espesor = kerf_nominal if kerf_nominal > 0 else 4
                     hover_kerf = f"<b>Disco (Kerf):</b> {espesor} mm<br><b>Cota:</b> {x_actual} mm"
-                    fig.add_trace(_crear_cubo_malla(
+                    fig.add_trace(_crear_cilindro_hueco_malla(
                         x0=x_actual,
                         x1=x_actual + espesor,
                         y_centro=y_pos,
-                        ancho_y=ancho_tubo * 1.25,
-                        alto_z=alto_tubo * 1.25,
+                        radio_ext=radio_ext_kerf,
+                        radio_int=radio_int_kerf,
                         color="#E53935",
                         hover_text=hover_kerf
                     ))
                     x_actual += espesor
 
-        # 3. Prisma 3D: Sobrante
+        # 3. Cilindro hueco 3D: Sobrante
         sobrante_mm = fila["Sobrante_mm"]
         if sobrante_mm > 0:
             clasif = fila["Clasificacion"]
@@ -108,14 +138,15 @@ def crear_gemelo_digital_3d(detalle_csv, kerf_nominal=4):
             hover_sob = (
                 f"<b>Bancada:</b> {origen_id}<br>"
                 f"<b>Estado:</b> {clasif}<br>"
-                f"<b>Longitud:</b> {sobrante_mm} mm"
+                f"<b>Longitud:</b> {sobrante_mm} mm<br>"
+                f"<b>Diámetro:</b> {int(diam)} mm"
             )
-            fig.add_trace(_crear_cubo_malla(
+            fig.add_trace(_crear_cilindro_hueco_malla(
                 x0=x_actual,
                 x1=fila["Longitud_Inicial"],
                 y_centro=y_pos,
-                ancho_y=ancho_tubo,
-                alto_z=alto_tubo,
+                radio_ext=radio_ext,
+                radio_int=radio_int,
                 color=color_sob,
                 hover_text=hover_sob,
                 opacity=0.9
@@ -183,6 +214,7 @@ def crear_grafico_balance_dona(bal):
     values = []
     colors = []
     pulls = []
+    text_labels = []
 
     for l, v in zip(etiquetas_todas, valores_todos):
         if v > 0:
@@ -190,6 +222,8 @@ def crear_grafico_balance_dona(bal):
             values.append(v)
             colors.append(colores_map[l])
             pulls.append(0.04 if l == "Material Incorporado" else 0.0)
+            pct = (v / total_origen * 100.0) if total_origen > 0 else 0.0
+            text_labels.append(f"{pct:.1f}%" if pct >= 2.0 else "")
 
     fig = go.Figure()
     fig.add_trace(go.Pie(
@@ -198,7 +232,8 @@ def crear_grafico_balance_dona(bal):
         hole=0.60,
         pull=pulls,
         marker=dict(colors=colors, line=dict(color="#0F172A", width=2)),
-        textinfo="percent",
+        text=text_labels,
+        textinfo="text",
         textposition="inside",
         textfont=dict(color="#F8FAFC", size=12),
         hovertemplate="<b>%{label}</b><br>Longitud: %{value} mm<br>Proporción: %{percent}<extra></extra>"
@@ -399,18 +434,24 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
 
     if cota_corte_actual >= longitud_total and fila_detalle["Sobrante_mm"] > 0:
         color_sob = '#EAB308' if fila_detalle["Clasificacion"] == "Retal Reutilizable" else '#64748B'
+        sobrante_val = fila_detalle["Sobrante_mm"]
+        texto_sob = (
+            f"{sobrante_val} mm"
+            if sobrante_val < 300
+            else f"{fila_detalle['Clasificacion']} ({sobrante_val} mm)"
+        )
         fig.add_trace(go.Bar(
             y=[origen_id],
-            x=[fila_detalle["Sobrante_mm"]],
-            base=longitud_total - fila_detalle["Sobrante_mm"],
+            x=[sobrante_val],
+            base=longitud_total - sobrante_val,
             orientation='h',
             marker_color=color_sob,
-            text=f"{fila_detalle['Clasificacion']} ({fila_detalle['Sobrante_mm']} mm)",
+            text=texto_sob,
             textposition='inside',
             textfont=dict(color='black' if fila_detalle["Clasificacion"] == "Retal Reutilizable" else 'white', size=11),
             name='Sobrante',
             showlegend=False,
-            hovertemplate=f"<b>{fila_detalle['Clasificacion']}:</b> {fila_detalle['Sobrante_mm']} mm<extra></extra>"
+            hovertemplate=f"<b>{fila_detalle['Clasificacion']}:</b> {sobrante_val} mm<extra></extra>"
         ))
 
     fig.add_shape(
@@ -437,7 +478,7 @@ def crear_simulacion_paso_a_paso(fila_detalle, cota_corte_actual, kerf_nominal=4
     )
     return fig
 
-def generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral):
+def generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral, diametro_mm=100):
     """
     Genera un informe técnico formal en formato texto estructurado (Markdown)
     para bitácora de obra y auditoría de materiales.
@@ -447,6 +488,7 @@ def generar_reporte_texto(res, res_orig, l_comercial, kerf, umbral):
     lineas.append("# INFORME TÉCNICO DE CORTE Y BALANCE DE MATERIAL")
     lineas.append("==================================================")
     lineas.append(f"- Longitud Comercial Estándar: {l_comercial} mm")
+    lineas.append(f"- Diámetro del Tubo:           {diametro_mm} mm ({diametro_mm / 25.4:.2f} in)")
     lineas.append(f"- Espesor de Disco (Kerf):      {kerf} mm")
     lineas.append(f"- Umbral Mínimo de Retal:       {umbral} mm")
     lineas.append("")

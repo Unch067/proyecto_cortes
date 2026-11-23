@@ -7,6 +7,7 @@ from components.validaciones import validar_datos_entrada, cargar_csv_datos
 import components.graficos as graficos_mod
 from components.graficos import (
     crear_gemelo_digital_3d,
+    crear_grafico_balance_dona,
     crear_simulacion_paso_a_paso,
     generar_reporte_texto
 )
@@ -291,6 +292,57 @@ class TestOptimizadorCortes(unittest.TestCase):
             df_err, err_msg = cargar_csv_datos(f, tipo="pedidos")
         self.assertIsNone(df_err)
         self.assertIn("decimales", err_msg.lower())
+
+    def test_cargar_csv_inventario_autogenera_ids_secuenciales(self):
+        csv_sin_id = "Longitud_mm,Cantidad\n3000,1\n1500,2\n"
+        df_inv1, err1 = cargar_csv_datos(io.StringIO(csv_sin_id), tipo="inventario")
+        self.assertEqual(err1, "")
+        self.assertEqual(list(df_inv1["ID_Retal"]), ["R1", "R2"])
+        self.assertEqual(list(df_inv1["Longitud_mm"]), [3000, 1500])
+
+        csv_con_id_viejo = "ID_Retal;Longitud_mm;Cantidad\nRET_X;2500;1\nRET_Y;1200;3\n"
+        df_inv2, err2 = cargar_csv_datos(io.StringIO(csv_con_id_viejo), tipo="inventario")
+        self.assertEqual(err2, "")
+        self.assertEqual(list(df_inv2["ID_Retal"]), ["R1", "R2"])
+        self.assertEqual(list(df_inv2["Cantidad"]), [1, 3])
+
+    def test_graficos_cilindros_huecos_dona_y_simulador(self):
+        df_ret = pd.DataFrame([{"ID_Retal": "R1", "Longitud_mm": 3000, "Cantidad": 1}])
+        df_ped = pd.DataFrame([
+            {"ID_Pieza": "P2900", "Longitud_mm": 2900, "Cantidad": 1},
+            {"ID_Pieza": "P2000", "Longitud_mm": 2000, "Cantidad": 1},
+            {"ID_Pieza": "P1900", "Longitud_mm": 1900, "Cantidad": 1},
+            {"ID_Pieza": "P1800", "Longitud_mm": 1800, "Cantidad": 1}
+        ])
+        res = optimizar_cortes(df_ret, df_ped, self.l_comercial, self.kerf, self.umbral)
+
+        # 1. Reporte incluye diámetro y pulgadas
+        reporte = generar_reporte_texto(res, res, self.l_comercial, self.kerf, self.umbral, diametro_mm=200)
+        self.assertIn("200 mm", reporte)
+        self.assertIn("7.87 in", reporte)
+
+        # 2. Gemelo 3D construye cilindros huecos (96 vértices y 192 triángulos con 24 segmentos)
+        fig_3d = crear_gemelo_digital_3d(res["detalle_csv"], kerf_nominal=self.kerf, diametro_mm=200)
+        self.assertGreater(len(fig_3d.data), 0)
+        primera_malla = fig_3d.data[0]
+        self.assertEqual(len(primera_malla.x), 96)
+        self.assertEqual(len(primera_malla.i), 192)
+        self.assertAlmostEqual(max(primera_malla.z), 100.0, places=1)
+
+        # 3. Dona oculta porcentajes menores al 2% (Pérdida=16/9000=0.18%, Descarte=96/9000=1.07%)
+        fig_dona = crear_grafico_balance_dona(res["balance"])
+        pie_trace = fig_dona.data[0]
+        texto_por_etiqueta = dict(zip(pie_trace.labels, pie_trace.text))
+        self.assertEqual(texto_por_etiqueta["Pérdida por Corte"], "")
+        self.assertEqual(texto_por_etiqueta["Descarte Inútil"], "")
+        self.assertNotEqual(texto_por_etiqueta["Material Incorporado"], "")
+        self.assertNotEqual(texto_por_etiqueta["Retal Reutilizable"], "")
+
+        # 4. Simulador muestra solo mm cuando sobrante < 300 mm (288 mm en Tubo_Nuevo_1)
+        fila_tubo = next(f for f in res["detalle_csv"] if f["Origen_ID"] == "Tubo_Nuevo_1")
+        fig_sim = crear_simulacion_paso_a_paso(fila_tubo, fila_tubo["Longitud_Inicial"], kerf_nominal=self.kerf)
+        traza_sobrante = next(t for t in fig_sim.data if t.name == "Sobrante")
+        self.assertEqual(traza_sobrante.text, "288 mm")
 
 
 if __name__ == "__main__":
