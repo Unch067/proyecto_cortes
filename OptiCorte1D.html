@@ -6,6 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
     <title>OptiCorte 1D - Grupo 03</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.css" />
+    <style>
+      html, body {
+        background-color: #0e1117;
+        color-scheme: dark;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
@@ -18,12 +24,13 @@
           requirements: ["pandas", "plotly"],
           entrypoint: "app.py",
           files: {
-            "app.py": { url: `${BASE_URL}/app.py?v=2` },
+            ".streamlit/config.toml": '[theme]\nbase = "dark"\n',
+            "app.py": { url: `${BASE_URL}/app.py?v=3` },
             "core/__init__.py": "",
-            "core/optimizador.py": { url: `${BASE_URL}/core/optimizador.py?v=2` },
+            "core/optimizador.py": { url: `${BASE_URL}/core/optimizador.py?v=3` },
             "components/__init__.py": "",
-            "components/validaciones.py": { url: `${BASE_URL}/components/validaciones.py?v=2` },
-            "components/graficos.py": { url: `${BASE_URL}/components/graficos.py?v=2` }
+            "components/validaciones.py": { url: `${BASE_URL}/components/validaciones.py?v=3` },
+            "components/graficos.py": { url: `${BASE_URL}/components/graficos.py?v=3` }
           },
         },
         document.getElementById("root")
