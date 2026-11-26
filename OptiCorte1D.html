@@ -18,12 +18,12 @@
           requirements: ["pandas", "plotly"],
           entrypoint: "app.py",
           files: {
-            "app.py": { url: `${BASE_URL}/app.py` },
+            "app.py": { url: `${BASE_URL}/app.py?v=2` },
             "core/__init__.py": "",
-            "core/optimizador.py": { url: `${BASE_URL}/core/optimizador.py` },
+            "core/optimizador.py": { url: `${BASE_URL}/core/optimizador.py?v=2` },
             "components/__init__.py": "",
-            "components/validaciones.py": { url: `${BASE_URL}/components/validaciones.py` },
-            "components/graficos.py": { url: `${BASE_URL}/components/graficos.py` }
+            "components/validaciones.py": { url: `${BASE_URL}/components/validaciones.py?v=2` },
+            "components/graficos.py": { url: `${BASE_URL}/components/graficos.py?v=2` }
           },
         },
         document.getElementById("root")
